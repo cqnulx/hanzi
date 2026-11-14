@@ -4,6 +4,19 @@ try{currentLanguage=localStorage.getItem('hanzi-interface-language')==='zh'?'zh'
 export const getLanguage=()=>currentLanguage;
 export function setLanguage(language){currentLanguage=language==='zh'?'zh':'en';try{localStorage.setItem('hanzi-interface-language',currentLanguage);}catch{}return currentLanguage;}
 const zh={
+ 'New course added':'新课程已加入',
+ 'Custom course':'定制课程',
+ 'Existing course updated':'已调整现有课程',
+ 'Practice plan updated':'已调整练习安排',
+ 'Current learning level:':'当前学习水平：',
+ 'Practice difficulty:':'本次练习难度：',
+ 'Start this lesson':'开始这门课程',
+ 'Reviewing your request…':'正在结合你的水平判断如何调整…',
+ 'From your request:':'根据你的调整：',
+ 'Added to Choose a lesson, speaking and writing topics. Your new course is selected.':'已加入“选择课程”、口语与写作主题，并已自动选中。',
+ 'Start new course':'开始新课程',
+ 'Creating your new course…':'正在根据你的调整创建新课程…',
+ 'Your new course was added and selected.':'新课程已加入课程列表，并已为你选中。',
  'The computer learning service is unavailable. Please try again later.':'电脑伴学服务暂时不可用，请稍后重试。',
  'This website cannot connect to the learning service.':'当前网页无法连接伴学服务。',
  'Your learning session is invalid. Refresh this page to start again.':'学习档案连接已失效，请刷新网页重试。',

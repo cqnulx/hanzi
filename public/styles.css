@@ -153,3 +153,12 @@ html, body { min-width: 1024px; }
 .main-shell .button-green:hover:not(:disabled) { background: #d1dfbb; }
 .toast { background: #fffefa; border: 1px solid #cbd5c0; }
 .toast.error, .toast[data-kind="error"] { background: #fff0e8; border-color: #d8b49c; }
+.added-lesson-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 24px; border: 2px solid #789363; border-left-width: 7px; background: #eef4e4; padding: 24px; }
+.added-lesson-card h2 { font-size: 27px; margin: 10px 0; }
+.added-lesson-card p { font-size: 17px; line-height: 1.8; margin: 7px 0; }
+.added-lesson-card .added-lesson-request { padding: 10px 14px; background: #fffef9; border-radius: 7px; }
+.added-lesson-card .small { font-size: 16px; }
+.added-lesson-card > .button { flex-shrink: 0; }
+.custom-lesson-outline { max-width: 760px; margin: 18px auto; text-align: left; background: #f1f5e9; padding: 18px 22px; border: 1px solid #cedcc0; border-radius: 10px; }
+.custom-lesson-outline ul { padding-left: 24px; margin: 14px 0; line-height: 1.9; }
+.custom-lesson-outline p { line-height: 1.9; }

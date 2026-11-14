@@ -10,10 +10,11 @@ const lessons=[{id:'first-hello',title:'Hello',level:'HSK 1',duration:8,prerequi
  {id:'coffee-order',title:'Coffee',level:'HSK 2',duration:10,prerequisites:['first-hello'],description:'Order a coffee',objectives:['Request politely'],phrases:[]}];
 const phrase={hanzi:'你好',pinyin:'nǐ hǎo',english:'Hello'};
 function mockReply(payload,system){
+ if(payload.task==='adaptation')return{action:'create-course',reason:'The catalogue does not yet cover Chinese cities.',level:'HSK 1',levelReason:'Stated HSK 2 has not yet been checked in practice; start with short foundation sentences.',selectedLessonId:null,course:{english:{title:'Discover Chinese cities',subtitle:'Ask about a city',description:'Talk about Beijing and Shanghai using short Chinese sentences.',objectives:['Name a city','Ask where someone lives']},chinese:{title:'认识中国城市',subtitle:'用简单中文聊城市',description:'围绕北京和上海，练习介绍城市和询问住在哪里。',objectives:['说出城市名称','询问对方住在哪里']},duration:5}};
  if(payload.task==='lesson')return{title:'A fresh hello',subtitle:'Start a real conversation',category:'Everyday Chinese',description:'Personalized greeting practice.',objectives:['Greet someone','Introduce yourself'],phrases:Array.from({length:4},()=>({...phrase})),vocabulary:Array.from({length:4},()=>({...phrase})),writingPrompt:{title:'Introduce yourself',instruction:'Write two sentences.',starter:'我叫',tip:'Use your own name.'},videoFrames:Array.from({length:4},()=>({...phrase,note:'Say hello first.'}))};
  if(payload.task==='exercises')return{questions:Array.from({length:4},(_,i)=>({question:`Question ${i+1}: Which is a greeting?`,options:['你好','谢谢','再见','请问'],answer:0,explanation:'你好 means hello.'}))};
  if(payload.task==='quiz')return{results:payload.checkedResults.map(r=>({questionId:r.questionId,explanation:'你好 is the correct greeting.',correct:!r.correct})),summary:'You used the greeting accurately; this is limited evidence.',nextStep:'Try a new self-introduction.'};
- if(payload.task==='plan')return{plan:[{lessonId:'first-hello',title:'Practise a greeting',reason:'Start with the foundation while evidence is limited.',duration:5,difficulty:'Beginner',type:'lesson'},{lessonId:'coffee-order',title:'Order politely',reason:'Apply the foundation to a useful goal.',duration:5,difficulty:'Gentle',type:'lesson'}],summary:'Two short steps chosen for your goal.'};
+ if(payload.task==='plan')return payload.requiredLessonId?{plan:[{lessonId:payload.requiredLessonId,title:'Explore Chinese cities',reason:'Directly addresses your requested new topic.',duration:5,difficulty:'Beginner',type:'lesson'}],summary:'Start with a new course about Chinese cities.'}:{plan:[{lessonId:'first-hello',title:'Practise a greeting',reason:'Start with the foundation while evidence is limited.',duration:5,difficulty:'Beginner',type:'lesson'},{lessonId:'coffee-order',title:'Order politely',reason:'Apply the foundation to a useful goal.',duration:5,difficulty:'Gentle',type:'lesson'}],summary:'Two short steps chosen for your goal.'};
  if(payload.task==='speaking')return{feedback:'The recognized characters match the target; audio quality was not assessed.',nextStep:'Listen again, then try the same words in a question.'};
  if(payload.task==='profile')return{profileInsight:'Your stated goal suggests practical beginner conversations; ability is not yet assessed.',recommendedFocus:'Start with a short greeting check.'};
  if(payload.task==='activity')return{stepFeedback:'You reported exploring this lesson; completion alone does not prove mastery.',nextStep:'Try a fresh practice question.'};
@@ -117,13 +118,98 @@ test('model grading failure saves neither guessed feedback nor mastery evidence'
 });
 test('model chooses the full plan within prerequisite and time constraints',async()=>{
  const f=await fixture();try{
-  const r=await f.request('/api/plan',{feedback:'More cafe practice',language:'zh'});assert.equal(r.status,200);assert.equal(r.data.mode,'live');assert.equal(r.data.model,'deepseek-chat');assert.equal(r.data.state.planLanguage,'zh');assert.equal(r.data.plan[0].title,'Practise a greeting');assert.equal(f.calls[0].payload.task,'plan');assert.ok(f.calls[0].payload.advisoryPlan);assert.ok(r.data.plan.reduce((n,p)=>n+p.duration,0)<=15);
+  const r=await f.request('/api/plan',{feedback:'I want to learn about Chinese cities',language:'zh'});assert.equal(r.status,200);assert.equal(r.data.mode,'live');assert.equal(r.data.model,'deepseek-chat');assert.equal(r.data.state.planLanguage,'zh');assert.equal(r.data.plan[0].lessonId,r.data.addedLesson.id);assert.equal(r.data.addedLesson.level,'HSK 1');assert.deepEqual(f.calls.map(call=>call.payload.task),['adaptation','plan']);assert.ok(f.calls[1].payload.advisoryPlan);assert.ok(r.data.plan.reduce((n,p)=>n+p.duration,0)<=15);
  }finally{await f.close();}
+});
+
+test('feedback adds a bilingual session-owned course that persists and works through lesson, quiz and activity',async()=>{
+ const f=await fixture();try{
+  const adjusted=await f.request('/api/plan',{feedback:'我想学习中国的城市',language:'zh'});assert.equal(adjusted.status,200);
+  const course=adjusted.data.addedLesson;assert.match(course.id,/^custom-/);assert.equal(course.translations.zh.title,'认识中国城市');assert.equal(course.translations.en.title,'Discover Chinese cities');assert.equal(course.sourceFeedback,'我想学习中国的城市');
+  assert.equal(adjusted.data.plan.some(step=>step.lessonId===course.id),true);
+  const restored=(await f.request('/api/state')).data;assert.equal(restored.customLessons[0].id,course.id);
+  const file=JSON.parse(await fs.readFile(path.join(f.directory,'data',f.a.value.split('=')[1]+'.json'),'utf8'));assert.equal(file.customLessons[0].id,course.id);
+  const stranger=(await f.request('/api/state',undefined,f.b)).data;assert.deepEqual(stranger.customLessons,[]);
+  assert.equal((await f.request('/api/lesson',{lessonId:course.id},f.b)).status,400);
+  const lesson=await f.request('/api/lesson',{lessonId:course.id,language:'zh'});assert.equal(lesson.status,200);assert.equal(lesson.data.lesson.id,course.id);assert.equal(f.calls.at(-1).payload.outline.title,course.title);
+  const generated=await f.request('/api/exercises',{lessonId:course.id,language:'zh'});assert.equal(generated.status,200);
+  const quiz=await f.request('/api/quiz',{lessonId:course.id,exerciseSetId:generated.data.exerciseSet.id,answers:answersFor(generated.data.exerciseSet)});assert.equal(quiz.status,200);
+  const activity=await f.request('/api/activity',{type:'lesson',lessonId:course.id,title:course.title});assert.equal(activity.status,200);
+  const refreshed=await f.request('/api/plan',{});assert.equal(refreshed.status,200);assert.equal(refreshed.data.addedLesson,null);assert.equal(refreshed.data.state.customLessons.length,1);
+  const exported=await f.request('/api/export');assert.equal(exported.data.customLessons[0].id,course.id);
+  assert.deepEqual((await f.request('/api/data',undefined,f.a,'DELETE')).data.state.customLessons,[]);
+ }finally{await f.close();}
+});
+
+test('a failed or unrelated adjusted plan saves neither a ghost course nor a replacement plan',async()=>{
+ const f=await fixture({reply:(payload,system)=>payload.task==='plan'&&payload.requiredLessonId?{plan:[{lessonId:'first-hello',title:'Unrelated greeting',reason:'Unrelated',duration:5,difficulty:'Easy'}],summary:'Missed the new topic.'}:mockReply(payload,system)});
+ try {
+  const original=await f.request('/api/plan',{});assert.equal(original.status,200);
+  const failed=await f.request('/api/plan',{feedback:'我想学习中国的城市',language:'zh'});assert.equal(failed.status,502);assert.match(failed.data.error,/requested course/);
+  const state=(await f.request('/api/state')).data;assert.deepEqual(state.customLessons,[]);assert.deepEqual(state.plan,original.data.plan);
+ }finally {await f.close();}
+ const incomplete=await fixture({reply:(payload,system)=>payload.task==='adaptation'?{...mockReply(payload,system),course:{english:{title:'Missing metadata'}}}:mockReply(payload,system)});
+ try {
+  assert.equal((await incomplete.request('/api/plan',{feedback:'New topic'})).status,502);
+  assert.deepEqual((await incomplete.request('/api/state')).data.customLessons,[]);assert.equal(incomplete.calls.length,1);
+ }finally {await incomplete.close();}
+});
+
+test('model can reuse a course or adjust practice without creating one, and real content follows the proposed difficulty',async()=>{
+ for(const action of ['use-existing','adjust-only']){
+  const f=await fixture({reply:(payload,system)=>payload.task==='adaptation'?{action,reason:'Existing greetings already support a slower foundation check.',level:'HSK 1',levelReason:'No checked practice yet; stated HSK 2 is not a measured level.',selectedLessonId:action==='use-existing'?'first-hello':null,course:null}:mockReply(payload,system)});
+  try {
+   await f.request('/api/lesson',{lessonId:'first-hello'});await f.request('/api/exercises',{lessonId:'first-hello'});
+   const result=await f.request('/api/plan',{feedback:'I need slower, simpler practice.'});assert.equal(result.status,200);assert.equal(result.data.addedLesson,null);assert.deepEqual(result.data.state.customLessons,[]);assert.equal(result.data.adaptation.action,action);
+   assert.equal(result.data.state.planAdaptation.level,'HSK 1');assert.equal(result.data.state.aiLessons['first-hello:en'],undefined);
+   const decision=f.calls.find(call=>call.payload.task==='adaptation').payload;assert.equal(decision.profile.level,'HSK 2');assert.deepEqual(decision.mastery,{});assert.ok(decision.availableLessons.some(lesson=>lesson.id==='first-hello'));
+   const adapted=await f.request('/api/lesson',{lessonId:'first-hello'});assert.equal(adapted.status,200);assert.equal(adapted.data.mode,'live');assert.equal(adapted.data.lesson.level,'HSK 1');assert.equal(f.calls.at(-1).payload.adaptation.action,action);assert.equal(f.calls.at(-1).payload.outline.level,'HSK 1');
+   const practice=await f.request('/api/exercises',{lessonId:'first-hello'});assert.equal(practice.data.mode,'live');assert.equal(f.calls.at(-1).payload.lesson.level,'HSK 1');
+   const writing=await f.request('/api/writing',{text:'我去昨天书店。',lessonId:'first-hello',level:'HSK 6'});assert.equal(writing.status,200);assert.equal(f.calls.at(-1).payload.level,'HSK 1');assert.equal(f.calls.at(-1).payload.currentLesson.id,'first-hello');assert.equal(f.calls.at(-1).payload.adaptation.action,action);
+  }finally {await f.close();}
+ }
+});
+
+test('refreshing an adapted plan invalidates an old lesson newly selected into that plan',async()=>{
+ let plans=0;
+ const f=await fixture({reply:(payload,system)=>{
+  if(payload.task==='adaptation')return{action:'adjust-only',reason:'Use short foundation practice.',level:'HSK 1',levelReason:'There is no checked evidence of HSK 2 readiness.',selectedLessonId:null,course:null};
+  if(payload.task==='plan')return{plan:[{lessonId:'first-hello',title:'Slow greeting practice',reason:'Foundation first',duration:5,difficulty:'HSK 1',type:'review'},...++plans>1?[{lessonId:'coffee-order',title:'One simple drink request',reason:'Apply the foundation gently',duration:5,difficulty:'HSK 1',type:'lesson'}]:[]],summary:'Short foundation practice.'};
+  return mockReply(payload,system);
+ }});
+ try {
+  await f.request('/api/lesson',{lessonId:'coffee-order'});
+  await f.request('/api/plan',{feedback:'Please slow down.'});
+  assert.equal((await f.request('/api/lesson',{lessonId:'coffee-order'})).data.mode,'cached');
+  const refreshed=await f.request('/api/plan',{});assert.equal(refreshed.status,200);assert.equal(refreshed.data.plan.length,2);assert.equal(refreshed.data.state.aiLessons['coffee-order:en'],undefined);
+  const lesson=await f.request('/api/lesson',{lessonId:'coffee-order'});assert.equal(lesson.status,200);assert.equal(lesson.data.mode,'live');assert.equal(lesson.data.lesson.level,'HSK 1');
+ }finally {await f.close();}
+});
+
+test('unusable adaptation decisions do not create courses or silently replace a plan',async()=>{
+ for(const decision of [{action:'always-create',level:'HSK 1'},{action:'adjust-only',level:'HSK 99'},{action:'use-existing',level:'HSK 1',selectedLessonId:'another-session-course'}]){
+  const f=await fixture({reply:(payload,system)=>payload.task==='adaptation'?{...mockReply(payload,system),...decision}:mockReply(payload,system)});
+  try {
+   assert.equal((await f.request('/api/plan',{feedback:'Adapt my practice.'})).status,502);
+   const state=(await f.request('/api/state')).data;assert.deepEqual(state.customLessons,[]);assert.deepEqual(state.plan,[]);assert.equal(f.calls.length,1);
+  }finally {await f.close();}
+ }
 });
 test('invalid model plans never silently fall back to algorithm plans',async()=>{
  for(const invalid of [{plan:[{lessonId:'coffee-order',title:'Skip',reason:'Skip foundation',duration:5,difficulty:'Hard'}],summary:'Bad'},{plan:[{lessonId:'first-hello',title:'Too long',reason:'Long',duration:50,difficulty:'Easy'}],summary:'Bad'},{plan:[{lessonId:'unknown',title:'Unknown',reason:'Unknown',duration:5,difficulty:'Easy'}],summary:'Bad'}]){
   const f=await fixture({reply:()=>invalid});try{assert.equal((await f.request('/api/plan',{})).status,502);assert.deepEqual((await f.request('/api/state')).data.plan,[]);}finally{await f.close();}
  }
+});
+
+test('an invalid generated plan is corrected by one model request with validation feedback',async()=>{
+ const f=await fixture({reply:(payload,system)=>{
+  if(payload.task==='plan'&&!payload.validationFeedback){const valid=mockReply(payload,system);return{...valid,plan:[valid.plan[0],{...valid.plan[0],title:'Second round of the same course'}]};}
+  return mockReply(payload,system);
+ }});
+ try {
+  const result=await f.request('/api/plan',{});assert.equal(result.status,200);assert.equal(result.data.mode,'live');assert.equal(f.calls.length,2);
+  assert.ok(f.calls[1].payload.previousPlan);assert.match(f.calls[1].payload.validationFeedback,/no duplicate courses/);assert.equal(new Set(result.data.plan.map(step=>step.lessonId)).size,result.data.plan.length);
+ }finally {await f.close();}
 });
 test('speaking retains an honest transcript metric and receives model coaching',async()=>{
  const f=await fixture();try{
