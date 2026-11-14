@@ -3,6 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const MAX_BODY = 32768;
+const MAX_REPORTED_INPUT = 4000;
 const SESSION = /^[a-f0-9]{64}$/;
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
 const ROUTES = new Set(['health','state','export','data','profile','memory','activity','lesson','exercises','quiz','chat','writing','speaking','plan','feedback'].map(route=>`/api/${route}`));
@@ -16,9 +17,10 @@ function origin(value,name,{upstream=false}={}) {
   return url.origin;
 }
 
-async function readBody(req) {
+async function readBody(req, capture) {
   const parts=[];let length=0;
-  for await(const chunk of req){length+=chunk.length;if(length>MAX_BODY)throw fail(413,'Request is too large.');parts.push(chunk);}
+  // Do not destroy the response socket when an oversized chunk stops reading.
+  for await(const chunk of req.iterator({destroyOnReturn:false})){capture(chunk);length+=chunk.length;if(length>MAX_BODY){req.resume();throw fail(413,'Request is too large.');}parts.push(chunk);}
   return Buffer.concat(parts);
 }
 
@@ -29,7 +31,12 @@ export function createGateway(options={}) {
   const allowedOrigin=origin(options.allowedOrigin||process.env.HANZI_FRONTEND_ORIGIN||'https://qiuxicqu.github.io','Allowed website');
   const fetchImpl=options.fetchImpl||globalThis.fetch;
   const timeoutMs=options.timeoutMs??120000;
+  const reportRejection=options.reportRejection||(async record=>{
+    const response=await globalThis.fetch(upstream+'/internal/monitor/rejected',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record),signal:AbortSignal.timeout(2000)});
+    if(!response.ok)throw new Error('Rejection recording failed.');
+  });
   return http.createServer(async(req,res)=>{
+    const startedAt=new Date().toISOString();
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Cache-Control','no-store');
@@ -39,7 +46,16 @@ export function createGateway(options={}) {
       res.setHeader('Access-Control-Expose-Headers','X-Hanzi-Session, Content-Disposition');
     }
     const send=(status,error)=>{if(!res.headersSent&&!res.destroyed){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error}));}};
-    let timer,controller;
+    let timer,controller,trackedPath,supplied;
+    let reportedBytes=0,receivedBytes=0,bodyComplete=false;
+    const prefix=[];
+    const capture=chunk=>{receivedBytes+=chunk.length;const remaining=MAX_REPORTED_INPUT*4-reportedBytes;if(remaining>0){const part=chunk.subarray(0,remaining);prefix.push(part);reportedBytes+=part.length;}};
+    const reportedInput=()=>{
+      const raw=Buffer.concat(prefix).toString('utf8'),body=raw.slice(0,MAX_REPORTED_INPUT);
+      const truncated=!bodyComplete||receivedBytes>reportedBytes||raw.length>MAX_REPORTED_INPUT;
+      if(!truncated){try{return JSON.parse(body);}catch{}}
+      return {body,truncated};
+    };
     try {
       if(!LOCAL_HOST.test(req.headers.host||''))throw fail(403,'The learning gateway only accepts its local tunnel connection.');
       let url;try{url=new URL(req.url,'http://localhost');}catch{throw fail(400,'Invalid request path.');}
@@ -53,10 +69,13 @@ export function createGateway(options={}) {
         res.writeHead(204,{'Access-Control-Allow-Methods':'GET, HEAD, POST, PUT, DELETE, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Hanzi-Session','Access-Control-Max-Age':'600'});res.end();return;
       }
       if(!['GET','HEAD','POST','PUT','DELETE'].includes(req.method))throw fail(405,'Method not allowed.');
-      const supplied=req.headers['x-hanzi-session'];
+      if(req.headers.origin===allowedOrigin&&url.pathname!=='/api/health')trackedPath=url.pathname;
+      supplied=req.headers['x-hanzi-session'];
+      // Capture a bounded prefix even when a body will be rejected locally.
+      const body=['GET','HEAD'].includes(req.method)?undefined:await readBody(req,capture);
+      bodyComplete=true;
       if(supplied!==undefined&&(typeof supplied!=='string'||!SESSION.test(supplied)))throw fail(400,'Your learning session is invalid. Refresh this page to start again.');
       if(Number(req.headers['content-length'])>MAX_BODY)throw fail(413,'Request is too large.');
-      const body=['GET','HEAD'].includes(req.method)?undefined:await readBody(req);
       // Deliberately forward only body metadata and the isolated session. Never
       // relay remote cookies, authorization, origin, forwarded host or fetch-site.
       const headers={};
@@ -77,7 +96,14 @@ export function createGateway(options={}) {
       const disposition=response.headers.get('content-disposition');if(disposition)resultHeaders['Content-Disposition']=disposition;
       const content=Buffer.from(await response.arrayBuffer());
       if(!res.destroyed){res.writeHead(response.status,resultHeaders);res.end(req.method==='HEAD'?undefined:content);}
-    }catch(error){send(error.status||502,error.status?error.message:'The computer learning service is unavailable. Please try again later.');}
+    }catch(error){
+      const status=error.status||502,message=error.status?error.message:'The computer learning service is unavailable. Please try again later.';
+      if(trackedPath){
+        try{await reportRejection({startedAt,method:req.method,path:trackedPath,status,input:reportedInput(),output:{error:message},...(typeof supplied==='string'&&SESSION.test(supplied)?{session:supplied}:{})});}
+        catch{console.error('A rejected website request could not be recorded on this computer.');}
+      }
+      send(status,message);
+    }
     finally{clearTimeout(timer);}
   });
 }

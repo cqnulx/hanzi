@@ -28,6 +28,8 @@
 
 电脑后端可通过 `gateway.mjs` 与 HTTPS 通道连接 GitHub 网页，具体步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。用户选择不设访问口令和请求限额；浏览器通过独立会话隔离学习记录，密钥和文件保留在本机。电脑和通道需持续在线。
 
+所有访问者的请求可在本机 <http://127.0.0.1:4173/monitor> 集中查看输入、返回和失败原因，使用说明见 [MONITORING.md](MONITORING.md)。
+
 ## 算法来源
 
 `algorithms.mjs` 是公开算法的无依赖原创实现，借鉴开源项目与公开文献的思路，没有复制或打包第三方项目代码：

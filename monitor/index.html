@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>伴学请求记录 · 本机查看</title>
+  <link rel="stylesheet" href="/monitor/monitor.css">
+  <script type="module" src="/monitor/monitor.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">智能伴学助手</div>
+    <div class="side-label">本机管理</div>
+    <div class="side-current">输入与输出记录</div>
+    <p>汇总所有访问者向这台后端提交的请求。</p>
+    <p class="side-foot">此页面仅供本机查看</p>
+  </aside>
+  <main>
+    <header>
+      <div><p class="eyebrow">学习服务 · 运行记录</p><h1>前端输入与后端输出</h1></div>
+      <div class="actions"><label class="auto"><input id="auto-refresh" type="checkbox" checked>每 5 秒刷新</label><button id="refresh" type="button">立即刷新</button><a class="button" id="export" href="/api/monitor/export">导出当天记录</a></div>
+    </header>
+    <p class="notice">仅记录已提交给后端的内容；未提交草稿和浏览器本地朗读不会上传。不同浏览器是不同会话。</p>
+    <form id="filters" class="filters">
+      <label>记录日期<input id="date" type="date" required list="available-dates"></label>
+      <datalist id="available-dates"></datalist>
+      <label>访问会话<input id="session" type="search" placeholder="输入会话编号"></label>
+      <label>请求类型<select id="kind"><option value="">全部类型</option><option value="chat">伴学对话</option><option value="writing">交互写作</option><option value="speaking">口语练习</option><option value="lesson">课程生成</option><option value="exercises">习题生成</option><option value="quiz">习题批改</option><option value="plan">学习计划</option><option value="profile">学习画像</option><option value="memory">长期记忆</option><option value="activity">学习活动</option><option value="feedback">学习反思</option><option value="state">学习档案</option><option value="export">数据导出</option><option value="data">清空档案</option></select></label>
+      <label class="search">搜索摘要<input id="query" type="search" placeholder="搜索内容摘要或姓名"></label>
+      <button type="submit">应用筛选</button>
+    </form>
+    <div id="connection" role="status" aria-live="polite">正在读取本机请求记录……</div>
+    <div class="stats" aria-label="请求记录概览">
+      <div><span>当日已完成记录</span><strong id="total">—</strong></div>
+      <div><span>正在处理</span><strong id="active-count">—</strong></div>
+      <div><span>列表成功 / 失败</span><strong id="outcomes">—</strong></div>
+      <div><span>列表访问会话</span><strong id="sessions">—</strong></div>
+    </div>
+    <section class="workbench">
+      <div class="request-list">
+        <div class="section-heading"><h2>访问请求</h2><span id="shown"></span></div>
+        <p class="list-note">点击记录查看原文。刷新列表时，已选详情会保留。</p>
+        <div id="records"></div>
+        <button id="more" class="more" type="button" hidden>加载更早的记录</button>
+      </div>
+      <div class="detail-panel" id="detail-panel">
+        <div class="section-heading"><h2>请求详情</h2><button id="copy" type="button" disabled>复制详情</button></div>
+        <p id="detail-empty" class="empty">选择左侧一条记录，查看提交内容与返回结果。</p>
+        <article id="detail" hidden>
+          <h3 id="detail-title"></h3>
+          <dl id="detail-meta"></dl>
+          <h3 class="payload-heading">前端提交</h3><pre id="detail-input"></pre>
+          <h3 class="payload-heading">后端返回</h3><pre id="detail-output"></pre>
+        </article>
+      </div>
+    </section>
+    <p class="footnote">“访问会话”用于区分浏览器，不代表已核实的个人身份。记录从本功能启用后开始保存。</p>
+  </main>
+</body>
+</html>

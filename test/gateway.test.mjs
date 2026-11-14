@@ -19,7 +19,7 @@ async function fixture(){
   if(req.url==='/api/export')res.setHeader('Content-Disposition','attachment; filename="hanzi-learning-data.json"');
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({profile:sessions.get(session)}));
  });
- const upstreamOrigin=await listen(upstream),gateway=createGateway({upstreamOrigin,allowedOrigin:website}),base=await listen(gateway);
+ const upstreamOrigin=await listen(upstream),gateway=createGateway({upstreamOrigin,allowedOrigin:website,reportRejection:async()=>{}}),base=await listen(gateway);
  const request=(route='/api/state',options={})=>fetch(base+route,{...options,headers:{Origin:website,'Content-Type':'application/json',...options.headers}});
  return{base,upstream,gateway,calls,request,close:async()=>{await close(gateway);await close(upstream);}};
 }
@@ -53,11 +53,47 @@ test('gateway bounds body size, preserves backend errors and refuses redirects',
   const huge=await f.request('/api/chat',{method:'POST',body:'x'.repeat(33000)});assert.equal(huge.status,413);assert.equal(f.calls.length,0);
   const unavailable=await f.request('/api/chat',{method:'POST',body:JSON.stringify({message:'Hello'})});assert.equal(unavailable.status,502);assert.match((await unavailable.json()).error,/temporarily unavailable/);assert.equal(unavailable.headers.get('access-control-allow-origin'),website);
  }finally{await f.close();}
- const gateway=createGateway({fetchImpl:async()=>new Response(null,{status:302,headers:{Location:'https://evil.example'}})}),base=await listen(gateway);
+ const gateway=createGateway({fetchImpl:async()=>new Response(null,{status:302,headers:{Location:'https://evil.example'}}),reportRejection:async()=>{}}),base=await listen(gateway);
  try{const result=await fetch(base+'/api/state',{headers:{Origin:website}});assert.equal(result.status,502);assert.match((await result.json()).error,/unexpected redirect/);assert.equal(result.headers.get('location'),null);}finally{await close(gateway);}
 });
 
 test('gateway does not accept non-local upstream destinations',()=>{
  assert.throws(()=>createGateway({upstreamOrigin:'https://example.com'}),/local HTTP/);
  assert.throws(()=>createGateway({allowedOrigin:'https://qiuxicqu.github.io/hanzi/'}),/origin only/);
+});
+
+test('gateway reports its own teaching rejections with bounded input, excluding preflight and hostile traffic',async()=>{
+ const reports=[],calls=[],session='a'.repeat(64);
+ const gateway=createGateway({reportRejection:async record=>{reports.push(record);},fetchImpl:async(url,options)=>{calls.push({url,options});return new Response(JSON.stringify({error:'Backend already recorded this error.'}),{status:400,headers:{'Content-Type':'application/json'}});}}),base=await listen(gateway);
+ const request=(route,options={})=>fetch(base+route,{...options,headers:{Origin:website,'Content-Type':'application/json',...options.headers}});
+ try{
+  const huge=await request('/api/chat',{method:'POST',headers:{'X-Hanzi-Session':session},body:JSON.stringify({message:'文'.repeat(12000)})});
+  assert.equal(huge.status,413);assert.equal(calls.length,0);assert.equal(reports.length,1);
+  assert.equal(reports[0].path,'/api/chat');assert.equal(reports[0].method,'POST');assert.equal(reports[0].status,413);assert.equal(reports[0].session,session);
+  assert.ok(Number.isFinite(Date.parse(reports[0].startedAt)));assert.equal(reports[0].input.truncated,true);assert.equal(reports[0].input.body.length,4000);assert.match(reports[0].input.body,/文/);
+  assert.deepEqual(reports[0].output,await huge.json());assert.ok(Buffer.byteLength(JSON.stringify(reports[0]))<32768);
+  const invalid=await request('/api/chat',{method:'POST',headers:{'X-Hanzi-Session':'bad-session'},body:JSON.stringify({message:'Keep the rejected input.'})});
+  assert.equal(invalid.status,400);assert.deepEqual(reports[1].input,{message:'Keep the rejected input.'});assert.equal(reports[1].session,undefined);assert.equal(calls.length,0);
+  assert.equal((await request('/api/chat',{method:'POST',body:JSON.stringify({message:'Backend error'})})).status,400);assert.equal(reports.length,2);assert.equal(calls.length,1);
+  await request('/api/chat',{method:'OPTIONS',headers:{'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'authorization'}});
+  await request('/api/chat',{method:'POST',headers:{Origin:'https://evil.example'},body:'{}'});
+  await request('/api/monitor/requests');await request('/.env');
+  assert.equal(reports.length,2);
+ }finally{await close(gateway);}
+});
+
+test('gateway reports connection failures and keeps rejection responses when recording fails',async()=>{
+ const reports=[];
+ const gateway=createGateway({fetchImpl:async()=>{throw new TypeError('Private transport detail.');},reportRejection:async record=>{reports.push(record);}}),base=await listen(gateway);
+ try{
+  const response=await fetch(base+'/api/chat',{method:'POST',headers:{Origin:website,'Content-Type':'application/json'},body:JSON.stringify({message:'Submitted before the service disconnected.'})});
+  assert.equal(response.status,502);assert.equal(reports.length,1);assert.equal(reports[0].status,502);assert.deepEqual(reports[0].input,{message:'Submitted before the service disconnected.'});assert.deepEqual(reports[0].output,await response.json());
+ }finally{await close(gateway);}
+ const originalError=console.error,messages=[];
+ const failing=createGateway({reportRejection:async()=>{throw new Error('Secret private detail.');}}),fallback=await listen(failing);
+ try{
+  console.error=message=>messages.push(message);
+  const response=await fetch(fallback+'/api/state',{headers:{Origin:website,'X-Hanzi-Session':'bad-session'}});
+  assert.equal(response.status,400);assert.equal(messages.length,1);assert.doesNotMatch(messages[0],/Secret|bad-session/);
+ }finally{console.error=originalError;await close(failing);}
 });
