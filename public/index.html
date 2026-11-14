@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#173e35" />
+    <meta name="description" content="A personal Chinese learning companion that remembers your journey. Learn, listen, speak, and write a little every day." />
+    <title>Hanzi — Your Chinese, remembered.</title>
+    <link rel="icon" type="image/png" href="./school-emblem.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#view-root">Skip to your learning space</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <a class="brand" href="#overview" aria-label="Hanzi home">
+          <img class="school-emblem" src="./school-emblem.png" width="58" height="58" alt="重庆师范大学校徽" />
+          <span><span class="brand-name">hanzi<span class="brand-period">.</span></span><span class="brand-tagline">A little every day.</span></span>
+        </a>
+        <div class="nav-label">YOUR LEARNING SPACE</div>
+        <nav class="main-nav" aria-label="Learning tools">
+          <button class="nav-item active" data-view="overview" type="button" aria-current="page"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg><span>Overview</span></button>
+          <button class="nav-item" data-view="learn" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 6v15m0-15C9 3 5 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-3-1-7-1-10 2Z"/></svg><span>Learn & watch</span></button>
+          <button class="nav-item" data-view="speak" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-4 0h8"/></svg><span>Speaking studio</span></button>
+          <button class="nav-item" data-view="write" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L21 7a2.12 2.12 0 0 0-3-3L6 16l-2 5Zm0 0h17"/></svg><span>Writing desk</span></button>
+          <button class="nav-item" data-view="path" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v7a5 5 0 0 0 5 5h5M8 5h6a4 4 0 0 1 0 8h-3"/></svg><span>My learning path</span></button>
+          <button class="nav-item" data-view="memory" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-8-4.7-8-11a4.8 4.8 0 0 1 8-3.5A4.8 4.8 0 0 1 20 10c0 6.3-8 11-8 11Z"/><path d="M8 12h3l1-3 2 6 1-3h2"/></svg><span>Learning memory</span></button>
+        </nav>
+        <div class="sidebar-note">
+          <span class="sidebar-note-symbol" lang="zh-CN">学</span>
+          <p>Small steps.<br />Lasting connections.</p>
+          <span>Your journey, remembered.</span>
+        </div>
+        <div class="sidebar-bottom">
+          <button type="button" class="profile-chip" id="profile-open" aria-label="Open learner profile">
+            <span class="avatar" id="profile-avatar">A</span>
+            <span class="profile-chip-copy"><strong id="profile-name">Alex</strong><span id="profile-level">HSK 2 learner</span></span>
+            <svg class="profile-settings-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+          </button>
+          <div class="local-label"><span class="status-dot"></span>Local learning space</div>
+        </div>
+      </aside>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-location"><span class="topbar-square" aria-hidden="true">H</span><span>My space</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb">Overview</strong></div>
+          <div class="topbar-actions">
+            <span class="api-status" id="api-status"><span class="status-dot"></span>Connecting</span>
+            <div class="language-toggle" id="language-toggle" role="group" aria-label="Choose interface language">
+              <button class="language-option is-active" type="button" data-language="en" lang="en" aria-pressed="true">EN</button>
+              <button class="language-option" type="button" data-language="zh" lang="zh-CN" aria-pressed="false">中文</button>
+            </div>
+            <button class="icon-button settings-button" id="settings-button" type="button" aria-label="Learner settings" title="Learner settings"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m10 3-.5 2.1-2 .9-1.9-.6-2 3.4 1.5 1.5v2.4l-1.5 1.5 2 3.4 2-.6 1.9.9.5 2.1h4l.5-2.1 2-.9 1.9.6 2-3.4-1.5-1.5v-2.4l1.5-1.5-2-3.4-2 .6-1.9-.9L14 3h-4Z"/><circle cx="12" cy="11.5" r="3"/></svg></button>
+          </div>
+        </header>
+        <main id="view-root" class="view-root" tabindex="-1" aria-label="Learning workspace">
+          <div class="initial-loading" role="status"><span class="brand-mark" lang="zh-CN">汉</span><p>Opening your learning space…</p></div>
+        </main>
+        <footer class="app-footer"><span>Made for a world of Chinese learners.</span><span lang="zh-CN">学无止境 <span aria-hidden="true">·</span> Keep growing.</span></footer>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="settings-dialog" class="app-dialog settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><div><p class="eyebrow">MAKE IT YOURS</p><h2 id="settings-title">Your learner profile</h2></div><button type="button" class="icon-button dialog-close" data-close-dialog="settings-dialog" aria-label="Close settings">×</button></div>
+      <p class="dialog-intro muted">A few details help your companion find the right pace, examples, and next steps.</p>
+      <form id="profile-form">
+        <div class="form-grid">
+          <label class="field">Your name<input class="input" name="name" id="learner-name" maxlength="60" autocomplete="given-name" value="Alex" required /></label>
+          <label class="field">Support language<select class="input" name="nativeLanguage" id="learner-language"><option value="English">English</option></select></label>
+          <label class="field">Current Chinese level<select class="input" name="level" id="learner-level"><option value="HSK 1">HSK 1 · Just beginning</option><option value="HSK 2" selected>HSK 2 · Building foundations</option><option value="HSK 3">HSK 3 · Everyday confidence</option><option value="HSK 4">HSK 4 · Independent learner</option><option value="HSK 5">HSK 5 · Advanced</option><option value="HSK 6">HSK 6 · Proficient</option></select></label>
+          <label class="field">Daily practice<select class="input" name="dailyMinutes" id="learner-minutes"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+        </div>
+        <label class="field">What would you like to achieve?<textarea class="textarea" name="goal" id="learner-goal" rows="3" maxlength="500" placeholder="For example: feel comfortable ordering food and chatting with friends.">Everyday conversation</textarea></label>
+        <div class="dialog-form-actions"><button type="button" class="button button-secondary" data-close-dialog="settings-dialog">Cancel</button><button type="submit" class="button button-primary" id="save-profile">Save my profile <span aria-hidden="true">↗</span></button></div>
+      </form>
+      <div class="data-controls"><div><h3>Your data stays in your control</h3><p class="muted">Manage the learning records stored in this local app.</p></div><div class="data-actions"><button type="button" id="export-data" class="button button-secondary">Export my data</button><button type="button" id="reset-data" class="button button-danger">Reset learning data</button></div></div>
+    </dialog>
+
+    <dialog id="content-dialog" class="app-dialog content-dialog" aria-label="Learning details"><button type="button" class="icon-button dialog-close content-dialog-close" data-close-dialog="content-dialog" aria-label="Close details">×</button><div id="content-dialog-body"></div></dialog>
+    <noscript><div class="noscript-notice">Please enable JavaScript to use your Hanzi learning companion.</div></noscript>
+  </body>
+</html>
