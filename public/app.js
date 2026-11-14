@@ -22,7 +22,7 @@ function apiUrl(path){
  return `${backend.origin}/api${path}`;
 }
 function emptyLearningState(){return {profile:{name:'Learner',nativeLanguage:'English',level:'HSK 1',dailyMinutes:15,goal:'Everyday conversation'},memories:[],activities:[],mastery:{},reviews:{},reflections:[],stats:{},plan:[]};}
-function serviceNotice(){return staticPagesMode||app.serviceUnavailable?`<section class="notice" role="status"><span>${staticPagesMode?serviceNotConnected:serviceUnavailable}</span><button class="text-button" data-view="speak">Open pronunciation</button>${!staticPagesMode?'<button class="text-button" data-action="retry-service">Try again</button>':''}</section>`:'';}
+function serviceNotice(){return staticPagesMode||app.serviceUnavailable?`<section class="notice service-notice" role="status"><span>${staticPagesMode?serviceNotConnected:serviceUnavailable}</span><button class="text-button" data-view="speak">Open pronunciation</button>${!staticPagesMode?'<button class="text-button" data-action="retry-service">Try again</button>':''}</section>`:'';}
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -137,20 +137,49 @@ async function exportLearningData(){
   link.href=url;link.download='hanzi-learning-data.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
  }catch(error){notify(error.message,'error');}
 }
+let serviceRequestSequence=0,serviceStatusSequence=0;
+function updateServiceBadge(){
+ const status=$('#api-status');if(!status)return;
+ const offline=staticPagesMode||app.serviceUnavailable,configured=app.serviceConfigured!==false;
+ status.innerHTML=`<span class="tiny-dot"></span>${offline?'Pronunciation available':configured?'Learning companion ready':'Companion setup needed'}`;
+ status.title=offline?(staticPagesMode?serviceNotConnected:serviceUnavailable):configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';
+ status.classList.toggle('offline',Boolean(offline));status.classList.toggle('connected',!offline&&configured);applyTranslations();
+}
+function setServiceConnection(available,sequence){
+ if(sequence<serviceStatusSequence)return;
+ serviceStatusSequence=sequence;app.serviceUnavailable=!available;updateServiceBadge();
+ if(available)document.querySelectorAll('.service-notice').forEach(notice=>notice.remove());
+ else if(app.state&&!$('.service-notice')){$('#view-root')?.insertAdjacentHTML('afterbegin',serviceNotice());applyTranslations();}
+}
 async function api(path,options={}) {
   if(staticPagesMode)throw new Error(serviceNotConnected);
-  const revision=learningRevision,session=remoteSession,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
+  const {timeoutMs=120000,skipLocalization=false,...requestOptions}=options;
+  const revision=learningRevision,session=remoteSession,sequence=++serviceRequestSequence,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+  let receivedResponse=false,adoptedSession='';
+  const currentSession=()=>revision===learningRevision&&(!configuredBackend||remoteSession===session||(adoptedSession&&remoteSession===adoptedSession));
   try {
-   const r=await fetch(apiUrl(path),{...options,credentials:configuredBackend?'omit':'same-origin',headers:{'Content-Type':'application/json',...options.headers,...(configuredBackend&&session?{'X-Hanzi-Session':session}:{})},signal:controller.signal});
+   const r=await fetch(apiUrl(path),{...requestOptions,credentials:configuredBackend?'omit':'same-origin',headers:{'Content-Type':'application/json',...requestOptions.headers,...(configuredBackend&&session?{'X-Hanzi-Session':session}:{})},signal:controller.signal});receivedResponse=true;
    const nextSession=r.headers.get('X-Hanzi-Session')||'';
-   if(configuredBackend&&revision===learningRevision&&remoteSession===session&&/^[a-f0-9]{64}$/.test(nextSession)){remoteSession=nextSession;try{localStorage.setItem(remoteSessionKey,nextSession);}catch{}}
+   if(path!=='/health'&&configuredBackend&&revision===learningRevision&&remoteSession===session&&/^[a-f0-9]{64}$/.test(nextSession)){remoteSession=nextSession;adoptedSession=nextSession;try{localStorage.setItem(remoteSessionKey,nextSession);}catch{}}
    const data=await r.json().catch(()=>({error:'Unreadable server response.'}));
-   if(!r.ok)throw new Error(data.error||`Request failed (${r.status}).`);
-   const resetsDifficulty=path==='/profile'||path==='/data'||(options.method==='DELETE'&&path.startsWith('/memory/'));
-   if(data.state&&revision===learningRevision&&(!configuredBackend||!nextSession||remoteSession===nextSession)&&(difficultyRevision(data.state)>=difficultyRevision(app.state)||resetsDifficulty)){const changed=difficultyRevision(data.state)!==difficultyRevision(app.state);app.state=data.state;if(changed)invalidateDifficultyContent();syncCatalogue();updateProfileBadge();if(path!=='/localize-learning')queueMicrotask(()=>ensureLocalizedLearning());}
+   if(!r.ok)throw Object.assign(new Error(data.error||`Request failed (${r.status}).`),{status:r.status,retryable:r.status>=500});
+   const incomingState=data.state||(path==='/state'&&data.profile?data:null);
+   if(path==='/state'&&!incomingState)throw new Error('Unreadable server response.');
+   const resetsDifficulty=path==='/profile'||path==='/data'||(requestOptions.method==='DELETE'&&path.startsWith('/memory/'));
+   const acceptsState=!incomingState||difficultyRevision(incomingState)>=difficultyRevision(app.state)||resetsDifficulty;
+   if(currentSession()&&acceptsState){
+    if(incomingState){const changed=difficultyRevision(incomingState)!==difficultyRevision(app.state);app.state=incomingState;if(changed)invalidateDifficultyContent();syncCatalogue();updateProfileBadge();if(!skipLocalization&&path!=='/localize-learning')queueMicrotask(()=>ensureLocalizedLearning());}
+    if(path==='/health'){if(typeof data.configured==='boolean')app.serviceConfigured=data.configured;if(app.state)updateServiceBadge();}
+    else setServiceConnection(true,sequence);
+   }
    return data;
   }
-  catch(e){if(e.name==='AbortError')throw new Error('This request took too long. Please try again.');if(configuredBackend&&e instanceof TypeError)throw new Error(serviceUnavailable);throw e;}finally{clearTimeout(timer);}
+  catch(e){
+   const timedOut=e.name==='AbortError'||e.name==='TimeoutError',networkError=!receivedResponse&&e instanceof TypeError;
+   if(currentSession()&&path!=='/health'&&(path==='/state'||timedOut||networkError))setServiceConnection(false,sequence);
+   if(timedOut)throw Object.assign(new Error('This request took too long. Please try again.'),{retryable:true});
+   if(networkError)throw Object.assign(new Error(configuredBackend?serviceUnavailable:e.message),{retryable:true});throw e;
+  }finally{clearTimeout(timer);}
 }
 const post = (path,data) => api(path,{method:'POST',body:JSON.stringify({language:getLanguage(),...data})});
 async function busy(button,task,label='Working…') {if(!button||button.disabled)return;const original=button.innerHTML;button.disabled=true;button.innerHTML=`<span class="spinner"></span>${esc(label)}`;try{return await task();}catch(e){notify(e.message,'error');}finally{if(button.isConnected){button.disabled=false;button.innerHTML=original;}}}
@@ -386,13 +415,29 @@ $('#export-data')?.addEventListener('click',exportLearningData);
 $('#reset-data')?.addEventListener('click',()=>{$('#settings-dialog').close();showInfo('Start a fresh learning space?',`<p>This removes your local memories, profile, practice evidence, plans and browser writing draft. Export your learning data first if you'd like to keep a copy.</p><div class="dialog-actions"><button class="button button-secondary" data-close-dialog>Keep my learning data</button><button class="button button-danger" id="confirm-reset">Remove my local learning data</button></div>`);$('#confirm-reset').addEventListener('click',e=>busy(e.currentTarget,async()=>{await api('/data',{method:'DELETE'});localStorage.removeItem('hanzi-writing-draft');app.writingText='';app.chat=[];clearGeneratedLearning();$('#content-dialog').close();navigate('overview');notify('Your local learning space has been reset.');},'Removing…'));});
 window.addEventListener('popstate',restoreRoute);
 window.addEventListener('beforeunload',()=>{persistDraft();stopRecording();stopSpeaking();for(const v of app.videos.values())v.dispose?.();});
-let connecting=false;
-async function init(){if(connecting)return;connecting=true;try{await connectLearningService();}finally{connecting=false;}}
-async function connectLearningService() {
- $('#view-root').innerHTML='<div class="app-loading"><span class="spinner"></span><p>Making a little room for Chinese…</p></div>';
- if(staticPagesMode){app.state=emptyLearningState();syncCatalogue();const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceNotConnected;restoreRoute();return;}
- try{const[state,health]=await Promise.all([api('/state'),api('/health')]);app.state=state.state||state;syncCatalogue();app.serviceUnavailable=false;const status=$('#api-status');status.innerHTML=`<span class="tiny-dot"></span>${health.configured?'Learning companion ready':'Companion setup needed'}`;status.title=health.configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';status.classList.remove('offline');if(health.configured)status.classList.add('connected');restoreRoute();ensureLocalizedLearning();}catch(e){if(configuredBackend){app.state=app.state||emptyLearningState();syncCatalogue();app.serviceUnavailable=true;const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceUnavailable;status.classList.remove('connected');status.classList.add('offline');restoreRoute();return;}$('#view-root').innerHTML=`<section class="card empty-state"><h1>Let's reconnect.</h1><p>${esc(e.message)}</p><p>Start the local server, then refresh this page.</p><button class="button button-primary" id="retry-connection">Try again</button></section>`;$('#retry-connection').addEventListener('click',()=>location.reload());}
+let connectionPromise=null;
+function init(){if(connectionPromise)return connectionPromise;connectionPromise=connectLearningService().finally(()=>{connectionPromise=null;});return connectionPromise;}
+async function readLearningState(){
+ for(let attempt=0;attempt<2;attempt++)try{return await api('/state',{timeoutMs:12000,skipLocalization:true});}catch(error){if(attempt||!error.retryable)throw error;}
 }
+async function connectLearningService() {
+ const hadState=Boolean(app.state),revision=learningRevision;
+ if(!hadState){$('#view-root').innerHTML='<div class="app-loading"><span class="spinner"></span><p>Making a little room for Chinese…</p></div>';applyTranslations();}
+ if(staticPagesMode){app.state=app.state||emptyLearningState();syncCatalogue();updateServiceBadge();if(!hadState)restoreRoute();return;}
+ try{
+  await readLearningState();if(revision!==learningRevision)return;
+  // Establish the learning session before checking setup. Health remains
+  // optional and cannot replace that session or discard a valid profile.
+  void api('/health',{timeoutMs:10000,skipLocalization:true}).catch(()=>{});
+  if(hadState)render();else{restoreRoute();ensureLocalizedLearning();}
+ }catch(error){
+  if(revision!==learningRevision)return;
+  if(!app.state){app.state=emptyLearningState();syncCatalogue();restoreRoute();}
+ }
+}
+function recoverLearningService(){if(app.serviceUnavailable&&!staticPagesMode)return init();}
+window.addEventListener('online',recoverLearningService);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')return recoverLearningService();});
 populateLanguageSelectors();
 observeTranslations();
 init();
