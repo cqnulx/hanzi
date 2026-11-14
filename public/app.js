@@ -5,9 +5,15 @@ import { createLessonVideo } from './lesson-video.js';
 import { API_BASE_URL } from './deployment-config.js';
 let lessons=getLocalizedLessons(getLanguage());
 
-const configuredBackend=String(API_BASE_URL||'').trim().replace(/\/+$/,'');
+const localHost=['localhost','127.0.0.1','::1','[::1]'].includes(location.hostname);
+const configuredBackend=localHost?'':String(API_BASE_URL||'').trim().replace(/\/+$/,'');
 const staticPagesMode=location.hostname.endsWith('.github.io')&&!configuredBackend;
 const serviceNotConnected='The learning service is not connected yet. You can use Chinese pronunciation now; guided lessons will be available when the service is connected.';
+const serviceUnavailable='The learning service is temporarily offline. Please try again shortly. Chinese pronunciation is still available.';
+// This installation keeps the same learning data when its public tunnel URL changes.
+const remoteSessionKey='hanzi-session:qiuxicqu-hanzi-computer';
+let remoteSession='';
+try{if(configuredBackend){const saved=localStorage.getItem(remoteSessionKey)||'',legacy=localStorage.getItem(`hanzi-session:${configuredBackend}`)||'';remoteSession=/^[a-f0-9]{64}$/.test(saved)?saved:/^[a-f0-9]{64}$/.test(legacy)?legacy:'';if(remoteSession&&saved!==remoteSession)localStorage.setItem(remoteSessionKey,remoteSession);}}catch{}
 function apiUrl(path){
  if(!configuredBackend)return `/api${path}`;
  let backend;try{backend=new URL(configuredBackend);}catch{throw new Error('The learning service address is unavailable.');}
@@ -15,7 +21,7 @@ function apiUrl(path){
  return `${backend.origin}/api${path}`;
 }
 function emptyLearningState(){return {profile:{name:'Learner',nativeLanguage:'English',level:'HSK 1',dailyMinutes:15,goal:'Everyday conversation'},memories:[],activities:[],mastery:{},reviews:{},reflections:[],stats:{},plan:[]};}
-function serviceNotice(){return staticPagesMode?`<section class="notice" role="status"><span>${serviceNotConnected}</span><button class="text-button" data-view="speak">Open pronunciation</button></section>`:'';}
+function serviceNotice(){return staticPagesMode||app.serviceUnavailable?`<section class="notice" role="status"><span>${staticPagesMode?serviceNotConnected:serviceUnavailable}</span><button class="text-button" data-view="speak">Open pronunciation</button>${!staticPagesMode?'<button class="text-button" data-action="retry-service">Try again</button>':''}</section>`:'';}
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -44,12 +50,27 @@ const memoryKind = m => m.kind||m.category;
 const activeMemories = () => (app.state?.memories||[]).filter(m=>!['archived','superseded','deleted'].includes(m.status));
 const labels = {overview:'Your learning space',learn:'Video lessons',speak:'Speaking studio',write:'Writing workshop',path:'Your learning path',memory:'Learning memory'};
 function notify(text,kind='info') {const t=$('#toast');t.textContent=text;t.dataset.kind=kind;t.classList.add('visible');clearTimeout(notify.timer);notify.timer=setTimeout(()=>t.classList.remove('visible'),5000);}
-function exportLearningData(){if(staticPagesMode){notify(serviceNotConnected);return;}try{location.href=apiUrl('/export');}catch(error){notify(error.message,'error');}}
+async function exportLearningData(){
+ if(staticPagesMode){notify(serviceNotConnected);return;}
+ try{
+  if(!configuredBackend){location.href=apiUrl('/export');return;}
+  const data=await api('/export'),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),link=document.createElement('a');
+  link.href=url;link.download='hanzi-learning-data.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){notify(error.message,'error');}
+}
 async function api(path,options={}) {
   if(staticPagesMode)throw new Error(serviceNotConnected);
-  const revision=learningRevision,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
-  try {const r=await fetch(apiUrl(path),{credentials:configuredBackend?'include':'same-origin',...options,headers:{'Content-Type':'application/json',...options.headers},signal:controller.signal});const data=await r.json().catch(()=>({error:'Unreadable server response.'}));if(!r.ok)throw new Error(data.error||`Request failed (${r.status}).`);if(data.state&&revision===learningRevision){app.state=data.state;updateProfileBadge();}return data;}
-  catch(e){if(e.name==='AbortError')throw new Error('This request took too long. Please try again.');throw e;}finally{clearTimeout(timer);}
+  const revision=learningRevision,session=remoteSession,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
+  try {
+   const r=await fetch(apiUrl(path),{...options,credentials:configuredBackend?'omit':'same-origin',headers:{'Content-Type':'application/json',...options.headers,...(configuredBackend&&session?{'X-Hanzi-Session':session}:{})},signal:controller.signal});
+   const nextSession=r.headers.get('X-Hanzi-Session')||'';
+   if(configuredBackend&&revision===learningRevision&&remoteSession===session&&/^[a-f0-9]{64}$/.test(nextSession)){remoteSession=nextSession;try{localStorage.setItem(remoteSessionKey,nextSession);}catch{}}
+   const data=await r.json().catch(()=>({error:'Unreadable server response.'}));
+   if(!r.ok)throw new Error(data.error||`Request failed (${r.status}).`);
+   if(data.state&&revision===learningRevision&&(!configuredBackend||!nextSession||remoteSession===nextSession)){app.state=data.state;updateProfileBadge();}
+   return data;
+  }
+  catch(e){if(e.name==='AbortError')throw new Error('This request took too long. Please try again.');if(configuredBackend&&e instanceof TypeError)throw new Error(serviceUnavailable);throw e;}finally{clearTimeout(timer);}
 }
 const post = (path,data) => api(path,{method:'POST',body:JSON.stringify({language:getLanguage(),...data})});
 async function busy(button,task,label='Working…') {if(!button||button.disabled)return;const original=button.innerHTML;button.disabled=true;button.innerHTML=`<span class="spinner"></span>${esc(label)}`;try{return await task();}catch(e){notify(e.message,'error');}finally{if(button.isConnected){button.disabled=false;button.innerHTML=original;}}}
@@ -213,7 +234,8 @@ document.addEventListener('click',async event=>{
  if(b.dataset.feedback){await busy(b,async()=>{const r=await post('/feedback',{message:b.dataset.feedback,context:app.view});showInfo('A thoughtful adjustment',`<p>${esc(r.attribution)}</p><p>${esc(r.action)}</p><p class="muted small">This is a provisional interpretation. Your next practice can help verify it.</p>`);},'Adjusting…');return;}
  if(b.dataset.deleteMemory){await busy(b,async()=>{await api(`/memory/${encodeURIComponent(b.dataset.deleteMemory)}`,{method:'DELETE'});clearGeneratedLearning();render();notify('Memory removed.');},'Removing…');return;}
  const action=b.dataset.action;
- if(action==='stop-pronunciation')resetPronunciation(false);
+ if(action==='retry-service')await init();
+ else if(action==='stop-pronunciation')resetPronunciation(false);
  else if(action==='clear-pronunciation')resetPronunciation(true);
  else if(action==='generate-lesson')await loadLesson(currentStudyId(),false);
  else if(action==='refresh-lesson')await loadLesson(currentStudyId(),true);
@@ -257,10 +279,12 @@ $('#export-data')?.addEventListener('click',exportLearningData);
 $('#reset-data')?.addEventListener('click',()=>{$('#settings-dialog').close();showInfo('Start a fresh learning space?',`<p>This removes your local memories, profile, practice evidence, plans and browser writing draft. Export your learning data first if you'd like to keep a copy.</p><div class="dialog-actions"><button class="button button-secondary" data-close-dialog>Keep my learning data</button><button class="button button-danger" id="confirm-reset">Remove my local learning data</button></div>`);$('#confirm-reset').addEventListener('click',e=>busy(e.currentTarget,async()=>{await api('/data',{method:'DELETE'});localStorage.removeItem('hanzi-writing-draft');app.writingText='';app.chat=[];clearGeneratedLearning();$('#content-dialog').close();navigate('overview');notify('Your local learning space has been reset.');},'Removing…'));});
 window.addEventListener('popstate',restoreRoute);
 window.addEventListener('beforeunload',()=>{persistDraft();stopRecording();stopSpeaking();for(const v of app.videos.values())v.dispose?.();});
-async function init() {
+let connecting=false;
+async function init(){if(connecting)return;connecting=true;try{await connectLearningService();}finally{connecting=false;}}
+async function connectLearningService() {
  $('#view-root').innerHTML='<div class="app-loading"><span class="spinner"></span><p>Making a little room for Chinese…</p></div>';
  if(staticPagesMode){app.state=emptyLearningState();const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceNotConnected;restoreRoute();return;}
- try{const[state,health]=await Promise.all([api('/state'),api('/health')]);app.state=state.state||state;const status=$('#api-status');status.innerHTML=`<span class="tiny-dot"></span>${health.configured?'Learning companion ready':'Companion setup needed'}`;status.title=health.configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';if(health.configured)status.classList.add('connected');restoreRoute();}catch(e){$('#view-root').innerHTML=`<section class="card empty-state"><h1>Let's reconnect.</h1><p>${esc(e.message)}</p><p>Start the local server, then refresh this page.</p><button class="button button-primary" id="retry-connection">Try again</button></section>`;$('#retry-connection').addEventListener('click',()=>location.reload());}
+ try{const[state,health]=await Promise.all([api('/state'),api('/health')]);app.state=state.state||state;app.serviceUnavailable=false;const status=$('#api-status');status.innerHTML=`<span class="tiny-dot"></span>${health.configured?'Learning companion ready':'Companion setup needed'}`;status.title=health.configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';status.classList.remove('offline');if(health.configured)status.classList.add('connected');restoreRoute();}catch(e){if(configuredBackend){app.state=app.state||emptyLearningState();app.serviceUnavailable=true;const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceUnavailable;status.classList.remove('connected');status.classList.add('offline');restoreRoute();return;}$('#view-root').innerHTML=`<section class="card empty-state"><h1>Let's reconnect.</h1><p>${esc(e.message)}</p><p>Start the local server, then refresh this page.</p><button class="button button-primary" id="retry-connection">Try again</button></section>`;$('#retry-connection').addEventListener('click',()=>location.reload());}
 }
 observeTranslations();
 init();

@@ -2,3 +2,6 @@
 data/
 node_modules/
 *.log
+runtime/
+.tools/
+*.pid

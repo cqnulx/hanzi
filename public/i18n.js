@@ -4,6 +4,10 @@ try{currentLanguage=localStorage.getItem('hanzi-interface-language')==='zh'?'zh'
 export const getLanguage=()=>currentLanguage;
 export function setLanguage(language){currentLanguage=language==='zh'?'zh':'en';try{localStorage.setItem('hanzi-interface-language',currentLanguage);}catch{}return currentLanguage;}
 const zh={
+ 'The computer learning service is unavailable. Please try again later.':'电脑伴学服务暂时不可用，请稍后重试。',
+ 'This website cannot connect to the learning service.':'当前网页无法连接伴学服务。',
+ 'Your learning session is invalid. Refresh this page to start again.':'学习档案连接已失效，请刷新网页重试。',
+ 'The learning service is temporarily offline. Please try again shortly. Chinese pronunciation is still available.':'伴学服务暂时离线，请稍后重试。你仍可使用中文自由朗读。',
  'The learning service is not connected yet. You can use Chinese pronunciation now; guided lessons will be available when the service is connected.':'伴学服务尚未连接。现在可以使用中文自由朗读；课程指导将在服务连接后开放。',
  'Open pronunciation':'打开自由朗读','The learning service address is unavailable.':'伴学服务地址暂不可用。','Pronunciation available':'自由朗读可用',
  'The learning service is not configured. Please contact the site administrator.':'伴学服务尚未配置，请联系网站管理员。',
