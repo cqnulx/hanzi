@@ -1,4 +1,4 @@
-// UI translations stay local; switching language never sends a model request.
+// Static UI translations stay local; stored teaching guidance is localized separately.
 import {locales} from './locales.js';
 import {normalizeLanguage,languageInfo} from './languages.js';
 let currentLanguage='en';
@@ -6,6 +6,13 @@ try{currentLanguage=normalizeLanguage(localStorage.getItem('hanzi-interface-lang
 export const getLanguage=()=>currentLanguage;
 export function setLanguage(language){currentLanguage=normalizeLanguage(language);try{localStorage.setItem('hanzi-interface-language',currentLanguage);}catch{}return currentLanguage;}
 const zh={
+ 'Next learning difficulty':'下次学习难度','YOUR NEXT LEARNING DIFFICULTY':'下次学习难度',
+ 'A little more challenge':'适当增加挑战','More support next time':'下次降低难度、加强巩固','Keep this difficulty':'保持当前难度',
+ 'Next practice':'下次练习','Previous practice':'此前练习','Recent first-attempt accuracy':'近期首答正确率','practice sets':'套练习',
+ 'Next focus:':'下次重点：','Teaching difficulty suggestion, not a proficiency assessment.':'这是教学难度建议，不是语言水平认定。',
+ 'Start next learning step':'开始下一次学习','This practice accuracy':'本次答题正确率','correct answers':'题答对',
+ 'Your results changed. Refresh your plan to use the new difficulty.':'答题结果已更新，请刷新计划以采用新的难度。',
+ 'Preparing guidance in your language…':'正在准备当前语言的学习提示…','Guidance translation is unavailable.':'学习提示暂时无法完成翻译。',
  'No specific corrections suggested. Try expanding your idea with another sentence.':'暂无需要修改的地方。可以再写一句，展开你的想法。',
  'Interface language':'界面语言','Language':'语言','Choose your support language':'选择辅助语言','Custom ·':'定制 ·',
  'Feedback in your support language · corrections in Chinese':'用辅助语言解释 · 用中文修改',

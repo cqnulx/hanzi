@@ -49,10 +49,48 @@ const icons = {
 };
 const icon = (name, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[name] || icons.spark}"/></svg>`;
 const app = {state:null,view:'overview',lessonId:null,phraseIndex:0,chat:[],writingResult:null,speakingResult:null,quizResult:null,writingText:localStorage.getItem('hanzi-writing-draft')||'',writingLessonId:null,videos:new Map(),recording:null,recordTimer:null,lessonSessions:new Map(),exerciseSets:new Map(),lessonPending:new Map(),lessonErrors:new Map(),exercisePending:new Set(),planPending:false};
-let learningRevision=0,feedbackRevision=0;
+let learningRevision=0,feedbackRevision=0,contentGeneration=0;
+const difficultyRevision=state=>Number(state?.learningDifficulty?.revision)||0;
+const localizedGuidance=record=>record?.translations?.[getLanguage()]||(record?.language===getLanguage()?record:null);
+const guidancePlaceholder=()=>translateText('Preparing guidance in your language…');
+const localizationRequests=new Map();
+function localizationSignature(language){
+ const state=app.state;if(!state)return null;
+ const courses=(state.customLessons||[]).filter(item=>!item.translations?.[language]);
+ const adaptation=state.planAdaptation,difficulty=state.learningDifficulty;
+ const missingAdaptation=adaptation&&!adaptation.translations?.[language]&&adaptation.language!==language;
+ const missingDifficulty=difficulty&&!difficulty.translations?.[language]&&difficulty.language!==language;
+ if(!courses.length&&!missingAdaptation&&!missingDifficulty)return null;
+ return JSON.stringify([language,courses.map(item=>[item.id,item.createdAt]),missingAdaptation?[adaptation.updatedAt,adaptation.reason,adaptation.levelReason]:null,missingDifficulty?[difficulty.revision,difficulty.reason,difficulty.focus]:null]);
+}
+async function ensureLocalizedLearning(retry=false){
+ const language=getLanguage(),signature=localizationSignature(language),revision=learningRevision;
+ if(!signature||(!retry&&localizationRequests.has(signature)))return;
+ const pending=(async()=>{try{await post('/localize-learning',{language});if(revision===learningRevision&&language===getLanguage()){app.localizationError=false;render();}}catch(error){localizationRequests.delete(signature);if(revision===learningRevision&&language===getLanguage()){app.localizationError=true;render();notify(error.message,'error');}}})();
+ localizationRequests.set(signature,pending);return pending;
+}
+function guidanceStatus(){return app.localizationError?'<div class="notice"><span>Guidance translation is unavailable.</span><button class="text-button" data-action="retry-guidance">Try again</button></div>':'';}
+function completedStudy(id){const item=app.completedQuiz;return app.view==='learn'&&item?.lesson.id===id&&item.language===getLanguage()?item:null;}
+function invalidateDifficultyContent(){
+ if(app.view==='write')persistDraft();
+ contentGeneration++;clearPracticeFeedback();app.lessonPending.clear();app.exercisePending.clear();
+ for(const video of app.videos.values())video.dispose?.();
+ app.videos.clear();app.lessonSessions.clear();app.exerciseSets.clear();app.lessonErrors.clear();app.completedQuiz=null;
+}
+function difficultyCard(record=app.state?.learningDifficulty,{button=true,nested=false}={}){
+ if(!record?.level)return '';
+ const current=app.state?.learningDifficulty;
+ if(current&&record.revision===current.revision&&record.sourceExerciseSetId===current.sourceExerciseSetId)record=current;
+ const targetLessonId=app.lessonId||app.state?.quizPerformance?.at(-1)?.lessonId||lessons[0]?.id;
+ if(app.state?.plan?.some(step=>step.lessonId===targetLessonId)&&(Date.parse(app.state.planAdaptation?.updatedAt)||0)>(Date.parse(record.updatedAt)||0))return '';
+ const direction={increase:'A little more challenge',decrease:'More support next time',maintain:'Keep this difficulty'}[record.action]||'Keep this difficulty';
+ const translated=localizedGuidance(record),sourceLanguage=languageInfo(getLanguage()).locale,lessonId=app.lessonId||app.state?.quizPerformance?.at(-1)?.lessonId||lessons[0]?.id;
+ const accuracy=Math.max(0,Math.min(100,Number(record.accuracy)||0));
+ return `<section class="${nested?'':'card '}difficulty-card" aria-label="Next learning difficulty"><div class="difficulty-card-heading"><div><span class="eyebrow">YOUR NEXT LEARNING DIFFICULTY</span><h2>${direction}</h2></div><div class="difficulty-level"><span>Next practice</span><strong>${esc(record.level)}</strong>${record.previousLevel&&record.previousLevel!==record.level?`<small><span>Previous practice</span> ${esc(record.previousLevel)}</small>`:''}</div></div><div class="difficulty-evidence"><strong>${accuracy}%</strong><div><span>Recent first-attempt accuracy</span><small>${Number(record.correct)||0} / ${Number(record.total)||0} · ${Number(record.attemptCount)||0} <span>practice sets</span></small></div></div><p data-no-translate lang="${sourceLanguage}">${esc(translated?.reason||guidancePlaceholder())}</p>${translated?.focus?`<p class="difficulty-focus"><strong>Next focus:</strong> <span data-no-translate lang="${sourceLanguage}">${esc(translated.focus)}</span></p>`:''}<p class="muted small">Teaching difficulty suggestion, not a proficiency assessment.</p>${button?`<button class="button button-primary" data-action="start-next-learning" data-lesson-id="${esc(lessonId)}">Start next learning step ${icon('arrow',17)}</button>`:''}</section>`;
+}
 function clearPracticeFeedback(){feedbackRevision++;app.speakingResult=null;app.writingResult=null;}
 function syncCatalogue(){
- const custom=(app.state?.customLessons||[]).filter(lesson=>lesson&&typeof lesson.id==='string'&&lesson.id.startsWith('custom-')).map(lesson=>({...lesson,...lesson.translations?.[getLanguage()],phrases:[],vocabulary:[],videoFrames:[],personalized:true})).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+ const custom=(app.state?.customLessons||[]).filter(lesson=>lesson&&typeof lesson.id==='string'&&lesson.id.startsWith('custom-')).map(lesson=>({...lesson,...(lesson.translations?.[getLanguage()]||{title:translateText('Personalised lesson'),subtitle:guidancePlaceholder(),description:guidancePlaceholder(),objectives:[]}),phrases:[],vocabulary:[],videoFrames:[],personalized:true})).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
  lessons=[...custom,...localizedCatalogue()];
  if(Object.hasOwn(app.state||{},'planAdaptation'))app.planAdaptation=app.state.planAdaptation;
  const preferred=app.planAdaptation?.selectedLessonId;
@@ -76,16 +114,17 @@ function addedLessonCard(){
  const lesson=lessons.find(item=>item.id===(adaptation.selectedLessonId||app.addedLessonId));
  const created=adaptation.action==='create-course'&&lesson?.personalized;
  const title=created?'New course added':adaptation.action==='use-existing'?'Existing course updated':'Practice plan updated';
- return `<section class="card added-lesson-card" id="plan-adaptation-result" role="status"><div><span class="badge">${title}</span>${lesson?`<h2>${esc(lesson.title)}</h2>`:`<h2>${title}</h2>`}<p data-no-translate>${esc(adaptation.reason||'')}</p>${created?`<p>${esc(lesson.description||lesson.subtitle)}</p><p class="added-lesson-request"><span>From your request:</span> <q data-no-translate>${esc(lesson.sourceFeedback||'')}</q></p><p class="small">Added to Choose a lesson, speaking and writing topics. Your new course is selected.</p>`:''}<p class="small"><strong>Practice difficulty:</strong> ${esc(adaptation.level||app.state.profile.level)}</p>${adaptation.levelReason?`<p class="small" data-no-translate>${esc(adaptation.levelReason)}</p>`:''}</div>${lesson?`<button class="button button-primary" data-lesson="${esc(lesson.id)}">${created?'Start new course':'Start this lesson'} ${icon('arrow',17)}</button>`:''}</section>`;
+ const translated=localizedGuidance(adaptation);
+ return `<section class="card added-lesson-card" id="plan-adaptation-result" role="status"><div><span class="badge">${title}</span>${lesson?`<h2>${esc(lesson.title)}</h2>`:`<h2>${title}</h2>`}<p data-no-translate>${esc(translated?.reason||guidancePlaceholder())}</p>${created?`<p>${esc(lesson.description||lesson.subtitle)}</p><p class="added-lesson-request"><span>From your request:</span> <q data-no-translate>${esc(lesson.sourceFeedback||'')}</q></p><p class="small">Added to Choose a lesson, speaking and writing topics. Your new course is selected.</p>`:''}<p class="small"><strong>Practice difficulty:</strong> ${esc(adaptation.level||app.state.profile.level)}</p>${translated?.levelReason?`<p class="small" data-no-translate>${esc(translated.levelReason)}</p>`:''}</div>${lesson?`<button class="button button-primary" data-lesson="${esc(lesson.id)}">${created?'Start new course':'Start this lesson'} ${icon('arrow',17)}</button>`:''}</section>`;
 }
 const courseKey = (id,language=getLanguage()) => `${id}:${language}`;
 const catalogueLesson = id => lessons.find(l=>l.id===id)||lessons[0];
-const lessonFor = id => app.lessonSessions.get(courseKey(id))?.lesson||catalogueLesson(id);
+const lessonFor = id => app.lessonSessions.get(courseKey(id))?.lesson||completedStudy(id)?.lesson||catalogueLesson(id);
 const selectedLesson = () => lessonFor(app.lessonId||lessons[0].id);
 const writingLesson = () => lessonFor(app.writingLessonId||app.lessonId||lessons[0].id);
-const isLessonReady = id => app.lessonSessions.has(courseKey(id));
+const isLessonReady = id => app.lessonSessions.has(courseKey(id))||Boolean(completedStudy(id));
 const currentStudyId = () => app.view==='write'?writingLesson().id:selectedLesson().id;
-const livePlan = () => ['live','llm'].includes(app.state?.planMode)&&app.state?.planLanguage===getLanguage()?app.state.plan||[]:[];
+const livePlan = () => ['live','llm'].includes(app.state?.planMode)&&app.state?.planLanguage===getLanguage()&&(Number(app.state.planDifficultyRevision)||0)===difficultyRevision(app.state)?app.state.plan||[]:[];
 const memoryKind = m => m.kind||m.category;
 const activeMemories = () => (app.state?.memories||[]).filter(m=>!['archived','superseded','deleted'].includes(m.status));
 const labels = {overview:'Your learning space',learn:'Video lessons',speak:'Speaking studio',write:'Writing workshop',path:'Your learning path',memory:'Learning memory'};
@@ -107,7 +146,8 @@ async function api(path,options={}) {
    if(configuredBackend&&revision===learningRevision&&remoteSession===session&&/^[a-f0-9]{64}$/.test(nextSession)){remoteSession=nextSession;try{localStorage.setItem(remoteSessionKey,nextSession);}catch{}}
    const data=await r.json().catch(()=>({error:'Unreadable server response.'}));
    if(!r.ok)throw new Error(data.error||`Request failed (${r.status}).`);
-   if(data.state&&revision===learningRevision&&(!configuredBackend||!nextSession||remoteSession===nextSession)){app.state=data.state;syncCatalogue();updateProfileBadge();}
+   const resetsDifficulty=path==='/profile'||path==='/data'||(options.method==='DELETE'&&path.startsWith('/memory/'));
+   if(data.state&&revision===learningRevision&&(!configuredBackend||!nextSession||remoteSession===nextSession)&&(difficultyRevision(data.state)>=difficultyRevision(app.state)||resetsDifficulty)){const changed=difficultyRevision(data.state)!==difficultyRevision(app.state);app.state=data.state;if(changed)invalidateDifficultyContent();syncCatalogue();updateProfileBadge();if(path!=='/localize-learning')queueMicrotask(()=>ensureLocalizedLearning());}
    return data;
   }
   catch(e){if(e.name==='AbortError')throw new Error('This request took too long. Please try again.');if(configuredBackend&&e instanceof TypeError)throw new Error(serviceUnavailable);throw e;}finally{clearTimeout(timer);}
@@ -171,7 +211,7 @@ function renderMemory() {
  const all=app.state.memories||[],active=activeMemories(),semantic=active.filter(m=>memoryKind(m)==='semantic');
  return `${heading('A COMPANION WITH CONTEXT','Your learning, remembered.','See the experiences and insights that help shape your next lesson.',`<button class="button button-secondary" data-action="export">Export my learning data ${icon('arrow',16)}</button>`)}<div class="stats-grid memory-stats"><div class="stat-card"><span>Active memories</span><strong>${active.length}</strong></div><div class="stat-card"><span>Longer-term insights</span><strong>${semantic.length}</strong></div><div class="stat-card"><span>Learning experiences</span><strong>${active.length-semantic.length}</strong></div></div><div class="notice">${icon('info',18)} <span>Memories are visible and removable by you. New evidence may update an older insight; uncertain inferences stay labelled.</span></div><section class="card add-memory"><form id="memory-form"><label for="memory-text">Something you'd like your companion to remember?</label><div><input id="memory-text" class="input" maxlength="1000" placeholder="For example: I want to order food confidently when I travel." required><button class="button button-primary" type="submit">${icon('memory',17)} Remember this</button></div></form></section><div class="section-heading memory-section-heading"><h2>A journal of your learning</h2><select id="memory-filter" class="input" aria-label="Filter learning memories"><option value="all">All memories</option><option value="semantic">Long-term insights</option><option value="episodic">Learning experiences</option><option value="superseded">Updated / archived</option></select></div><div class="memory-grid" id="memory-list">${memoryCards(all)}</div>`;
 }
-function quizResults(r) {return `<div class="quiz-results"><span class="badge">Companion feedback</span>${r.summary?`<p data-no-translate>${esc(r.summary)}</p>`:''}${(r.results||[]).map(v=>`<div class="quiz-result ${v.correct?'correct':'needs-work'}"><strong>${v.correct?'✓ Nice work.':'A good thing to revisit.'}</strong><p data-no-translate>${esc(v.explanation||v.feedback||'')}</p></div>`).join('')}${r.nextStep?`<div class="next-step"><span class="eyebrow">YOUR NEXT SMALL STEP</span><p data-no-translate>${esc(r.nextStep)}</p></div>`:''}<p class="muted small">${r.alreadyMeasured?'These questions were already measured; repeating them will not inflate your skill estimate.':'This practice is one piece of evidence. Your companion won’t assume mastery from a single answer.'}</p><button class="text-button" data-view="path">See my learning picture ${icon('arrow',15)}</button></div>`;}
+function quizResults(r) {const correct=(r.results||[]).filter(item=>item.correct).length,total=(r.results||[]).length;return `<div class="quiz-results"><div class="quiz-score"><div><span>This practice accuracy</span><strong>${total?Math.round(correct/total*100):0}%</strong></div><span>${correct} / ${total} <span>correct answers</span></span></div>${difficultyCard(r.difficultyAdjustment||app.state?.learningDifficulty,{nested:true})}<span class="badge">Companion feedback</span>${r.summary?`<p data-no-translate>${esc(r.summary)}</p>`:''}${(r.results||[]).map(v=>`<div class="quiz-result ${v.correct?'correct':'needs-work'}"><strong>${v.correct?'✓ Nice work.':'A good thing to revisit.'}</strong><p data-no-translate>${esc(v.explanation||v.feedback||'')}</p></div>`).join('')}${r.nextStep?`<div class="next-step"><span class="eyebrow">YOUR NEXT SMALL STEP</span><p data-no-translate>${esc(r.nextStep)}</p></div>`:''}<p class="muted small">${r.alreadyMeasured?'These questions were already measured; repeating them will not inflate your skill estimate.':'This practice is one piece of evidence. Your companion won’t assume mastery from a single answer.'}</p><button class="text-button" data-view="path">See my learning picture ${icon('arrow',15)}</button></div>`;}
 function lessonProvenance(lesson){
  const key=courseKey(lesson.id),record=app.lessonSessions.get(key),pending=app.lessonPending.has(key);
  return `<div class="section-heading"><span class="badge">${pending?'Preparing your next step…':record?.mode==='cached'?'Saved personalised lesson':'Personalised lesson'}</span><button class="text-button" data-action="refresh-lesson" ${pending?'disabled':''}>${icon('refresh',15)} New personalised lesson</button></div>`;
@@ -182,7 +222,7 @@ function renderLessonGate(id){
  return heading('YOUR LEARNING COMPANION',esc(lesson.title),lesson.personalized?esc(lesson.subtitle):'Your lesson, examples, writing prompt and video scenes are tailored to your current learning context.',`<label class="lesson-select-label">Choose a lesson<select id="${app.view==='write'?'writing-topic':'lesson-select'}" class="input">${lessonOptions(id)}</select></label>`)+`<section class="card empty-state"><div class="speaking-illustration">${illustration(id)}</div><span class="badge">${lesson.personalized?'Custom course':'Learning companion'}</span><h2>${pending?'Preparing your next step…':lesson.personalized?esc(lesson.title):'A lesson made for this step.'}</h2>${outline}<p>${error?esc(error):'Generate a lesson using your goals, learning memory and checked practice. Exercises are generated separately when you are ready.'}</p>${pending?'<span class="spinner"></span>':`<button class="button button-primary" data-action="generate-lesson">${icon('spark',17)} ${error?'Try again':'Prepare my lesson'}</button>`}<p class="muted small">Content is prepared on request. If the learning service is unavailable, retry when you are ready.</p></section>`;
 }
 async function loadLesson(id,refresh=false){
- const language=getLanguage(),key=courseKey(id,language),revision=learningRevision;
+ const language=getLanguage(),key=courseKey(id,language),revision=learningRevision,generation=contentGeneration;
  if(app.lessonPending.has(key))return app.lessonPending.get(key);
  if(!refresh&&app.lessonSessions.has(key)){render();return app.lessonSessions.get(key);}
  if(refresh)clearPracticeFeedback();
@@ -190,32 +230,34 @@ async function loadLesson(id,refresh=false){
  const promise=(async()=>{
    try{
      const result=await post('/lesson',{lessonId:id,language,refresh});
-     if(revision!==learningRevision)return;
+     if(revision!==learningRevision||generation!==contentGeneration)return;
      if(!result.lesson?.phrases?.length||!result.lesson?.writingPrompt)throw new Error('The lesson is incomplete. Please try again.');
      app.lessonSessions.set(key,result);
-     if(refresh){app.videos.get(key)?.dispose?.();app.videos.delete(key);app.exerciseSets.delete(key);if(app.quizResult?.lessonId===id)app.quizResult=null;if(writingLesson().id===id)app.writingResult=null;}
+     if(refresh){app.completedQuiz=null;app.videos.get(key)?.dispose?.();app.videos.delete(key);app.exerciseSets.delete(key);if(app.quizResult?.lessonId===id)app.quizResult=null;if(writingLesson().id===id)app.writingResult=null;}
      return result;
-   }catch(error){if(revision===learningRevision){app.lessonErrors.set(key,error.message);notify(error.message,'error');}}
-   finally{if(app.lessonPending.get(key)===promise)app.lessonPending.delete(key);if(revision===learningRevision&&['learn','speak','write'].includes(app.view)&&currentStudyId()===id&&getLanguage()===language)render();}
+   }catch(error){if(revision===learningRevision&&generation===contentGeneration){app.lessonErrors.set(key,error.message);notify(error.message,'error');}}
+   finally{if(app.lessonPending.get(key)===promise)app.lessonPending.delete(key);if(revision===learningRevision&&generation===contentGeneration&&['learn','speak','write'].includes(app.view)&&currentStudyId()===id&&getLanguage()===language)render();}
  })();
  app.lessonPending.set(key,promise);render();return promise;
 }
 function quizPanel(lesson){
- const key=courseKey(lesson.id),set=app.exerciseSets.get(key),pending=app.exercisePending.has(key),result=app.quizResult?.exerciseSetId===set?.id&&app.quizResult?.language===getLanguage()?app.quizResult:null;
+ const key=courseKey(lesson.id),set=app.exerciseSets.get(key)||completedStudy(lesson.id)?.exerciseSet,pending=app.exercisePending.has(key),result=app.quizResult?.exerciseSetId===set?.id&&app.quizResult?.language===getLanguage()?app.quizResult:null;
  return `<section class="card quiz-card"><div class="section-heading"><div><span class="eyebrow">A LITTLE CHECK-IN</span><h3>What stayed with you?</h3></div><span class="badge">Companion practice</span></div>${set?`<form id="quiz-form">${set.questions.map((q,i)=>`<fieldset class="quiz-question"><legend data-no-translate>${i+1}. ${esc(q.question)}</legend>${q.options.map((option,index)=>`<label class="quiz-option"><input type="radio" name="${esc(q.id)}" value="${index}" required><span data-no-translate>${esc(option)}</span></label>`).join('')}</fieldset>`).join('')}<button class="button button-primary" type="submit">Check my answers ${icon('arrow',16)}</button></form><div id="quiz-results" aria-live="polite">${result?quizResults(result):''}</div><button class="text-button" data-action="generate-exercises" data-refresh="true" ${pending?'disabled':''}>${pending?'Preparing your next step…':'Create a new practice set'}</button>`:`<div class="empty-state"><h3>Fresh practice, shaped around you.</h3><p>Your companion will create questions for this lesson using your learning context. It will review each answer and suggest your next step.</p><button class="button button-primary" data-action="generate-exercises" ${pending?'disabled':''}>${pending?'Preparing your next step…':'Create my practice'}</button></div>`}</section>`;
 }
 async function generateExercises(button,refresh=false){
- const lesson=selectedLesson(),language=getLanguage(),key=courseKey(lesson.id,language),revision=learningRevision;
+ const id=selectedLesson().id,language=getLanguage();
+ if(!app.lessonSessions.has(courseKey(id,language))){app.completedQuiz=null;app.quizResult=null;await loadLesson(id,true);if(language!==getLanguage()||!app.lessonSessions.has(courseKey(id,language)))return;}
+ const lesson=selectedLesson(),key=courseKey(lesson.id,language),revision=learningRevision,generation=contentGeneration;
  if(app.exercisePending.has(key))return;
  app.exercisePending.add(key);
  await busy(button,async()=>{
    const result=await post('/exercises',{lessonId:lesson.id,language,refresh});
-   if(revision!==learningRevision)return;
+   if(revision!==learningRevision||generation!==contentGeneration)return;
    if(!result.exerciseSet?.questions?.length)throw new Error('The practice set is incomplete. Please try again.');
-   app.exerciseSets.set(key,result.exerciseSet);app.quizResult=null;
+   app.exerciseSets.set(key,result.exerciseSet);app.quizResult=null;app.completedQuiz=null;
  },'Preparing your next step…');
- if(revision===learningRevision)app.exercisePending.delete(key);
- if(revision===learningRevision&&app.view==='learn'&&selectedLesson().id===lesson.id&&getLanguage()===language)render();
+ if(revision===learningRevision&&generation===contentGeneration)app.exercisePending.delete(key);
+ if(revision===learningRevision&&generation===contentGeneration&&app.view==='learn'&&selectedLesson().id===lesson.id&&getLanguage()===language)render();
 }
 function showCoach(title,feedback,nextStep){
  if(!feedback&&!nextStep){notify('Your learning update is saved.');return;}
@@ -224,13 +266,13 @@ function showCoach(title,feedback,nextStep){
 function clearGeneratedLearning(){
  clearPracticeFeedback();
  app.planFeedbackResult=null;app.planFeedbackText='';app.planAdaptation=null;app.addedLessonId=null;
- learningRevision++;app.lessonPending.clear();app.exercisePending.clear();
+ learningRevision++;contentGeneration++;app.completedQuiz=null;app.localizationError=false;app.lessonPending.clear();app.exercisePending.clear();
  for(const video of app.videos.values())video.dispose?.();
  app.videos.clear();app.lessonSessions.clear();app.exerciseSets.clear();app.lessonErrors.clear();app.quizResult=null;app.speakingResult=null;app.writingResult=null;
 }
 function updateProfileBadge() {const name=app.state?.profile?.name||'Alex';if($('#profile-name'))$('#profile-name').textContent=name;if($('#profile-avatar'))$('#profile-avatar').textContent=name.charAt(0).toUpperCase();if($('#profile-level'))$('#profile-level').textContent=app.state?.profile?.level||'HSK 2';}
 function stopRecording() {if(app.recording){app.recording.cancel();app.recording=null;}clearTimeout(app.recordTimer);}
-function render() {if(!app.state)return;stopRecording();stopSpeaking();app.pronunciationToken=(app.pronunciationToken||0)+1;const root=$('#view-root'),drafts=[...root.querySelectorAll('textarea,input:not([type="radio"]):not([type="checkbox"])')].filter(e=>e.id).map(e=>({id:e.id,value:e.value}));const renderers={overview:renderOverview,learn:renderLearn,speak:renderSpeak,write:renderWrite,path:renderPath,memory:renderMemory};const study=['learn','speak','write'].includes(app.view),id=study?currentStudyId():null;root.innerHTML=serviceNotice()+(study&&(!isLessonReady(id)||app.lessonPending.has(courseKey(id)))?(app.view==='speak'?renderPronunciationPanel():'')+renderLessonGate(id):(renderers[app.view]||renderOverview)());for(const field of drafts){const target=document.getElementById(field.id);if(target&&field.id!=='writing-text')target.value=field.value;}$('#breadcrumb').textContent=labels[app.view];document.querySelectorAll('nav [data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===app.view);if(b.dataset.view===app.view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});updateProfileBadge();applyTranslations();}
+function render() {if(!app.state)return;stopRecording();stopSpeaking();app.pronunciationToken=(app.pronunciationToken||0)+1;const root=$('#view-root'),quizChoices=[...root.querySelectorAll('#quiz-form input[type="radio"]')].map(e=>({name:e.name,value:e.value,checked:e.checked})),drafts=[...root.querySelectorAll('textarea,input:not([type="radio"]):not([type="checkbox"])')].filter(e=>e.id).map(e=>({id:e.id,value:e.value}));const renderers={overview:renderOverview,learn:renderLearn,speak:renderSpeak,write:renderWrite,path:renderPath,memory:renderMemory};const study=['learn','speak','write'].includes(app.view),id=study?currentStudyId():null;root.innerHTML=serviceNotice()+guidanceStatus()+(['overview','path','learn'].includes(app.view)?difficultyCard():[]) +(app.view==='path'&&app.state.plan?.length&&!livePlan().length&&(Number(app.state.planDifficultyRevision)||0)!==difficultyRevision(app.state)?'<div class="notice">Your results changed. Refresh your plan to use the new difficulty.</div>':'')+(study&&(!isLessonReady(id)||app.lessonPending.has(courseKey(id)))?(app.view==='speak'?renderPronunciationPanel():'')+renderLessonGate(id):(renderers[app.view]||renderOverview)());for(const field of drafts){const target=document.getElementById(field.id);if(target&&field.id!=='writing-text')target.value=field.value;}for(const field of quizChoices){const target=[...root.querySelectorAll('#quiz-form input[type="radio"]')].find(e=>e.name===field.name&&e.value===field.value);if(target)target.checked=field.checked;}$('#breadcrumb').textContent=labels[app.view];document.querySelectorAll('nav [data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===app.view);if(b.dataset.view===app.view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});updateProfileBadge();applyTranslations();}
 function switchLanguage(language){
  language=normalizeLanguage(language);
  if($('#interface-language'))$('#interface-language').value=language;
@@ -240,10 +282,10 @@ function switchLanguage(language){
  const fields=[...$('#view-root').querySelectorAll('input,textarea,select')].map(e=>({id:e.id,name:e.name,value:e.value,checked:e.checked,type:e.type}));
  setLanguage(language);syncCatalogue();render();
  for(const field of fields){const element=field.id?document.getElementById(field.id):[...$('#view-root').querySelectorAll('input')].find(e=>e.name===field.name&&e.value===field.value);if(!element)continue;if(field.type==='radio'||field.type==='checkbox')element.checked=field.checked;else element.value=field.value;}
- applyTranslations();
+ applyTranslations();ensureLocalizedLearning();
 }
 function persistDraft() {if($('#writing-text'))app.writingText=$('#writing-text').value;try{localStorage.setItem('hanzi-writing-draft',app.writingText);}catch{}}
-function navigate(view,id) {if(app.view==='write')persistDraft();if(view==='write'&&app.view==='learn')app.writingLessonId=selectedLesson().id;if(id){clearPracticeFeedback();app.lessonId=id;app.writingLessonId=id;app.phraseIndex=0;app.quizResult=null;app.speakingResult=null;}app.view=labels[view]?view:'overview';const hash=`#${app.view}${id?'/'+encodeURIComponent(id):''}`;if(location.hash!==hash)history.pushState(null,'',hash);render();window.scrollTo({top:0,behavior:'instant'});}
+function navigate(view,id) {if(app.view==='write')persistDraft();if(view==='write'&&app.view==='learn')app.writingLessonId=selectedLesson().id;if(id){clearPracticeFeedback();app.completedQuiz=null;app.lessonId=id;app.writingLessonId=id;app.phraseIndex=0;app.quizResult=null;app.speakingResult=null;}app.view=labels[view]?view:'overview';const hash=`#${app.view}${id?'/'+encodeURIComponent(id):''}`;if(location.hash!==hash)history.pushState(null,'',hash);render();window.scrollTo({top:0,behavior:'instant'});}
 function restoreRoute() {const[view,id]=location.hash.slice(1).split('/');navigate(labels[view]?view:'overview',lessons.some(l=>l.id===id)?id:undefined);}
 function showInfo(title,content) {$('#content-dialog-body').innerHTML=`<span class="eyebrow">HANZI LEARNING SPACE</span><h2>${esc(title)}</h2>${content}`;$('#content-dialog').showModal();}
 function openSettings() {const form=$('#profile-form');for(const[k,v]of Object.entries(app.state.profile))if(form.elements[k])form.elements[k].value=v;const selected=LANGUAGES.find(item=>item.name===app.state.profile.nativeLanguage||item.code===app.state.profile.nativeLanguage);$('#learner-language').value=(selected||languageInfo(getLanguage())).name;$('#settings-dialog').showModal();}
@@ -252,7 +294,7 @@ async function sendChat(message,button) {
  await busy(button,async()=>{const revision=learningRevision,history=app.chat.slice(-12);app.chat.push({role:'user',content:message});$('#chat-messages').innerHTML=chatMarkup();$('#chat-input').value='';const pending=document.createElement('div');pending.className='message message-assistant loading';pending.textContent='Your companion is thinking…';$('#chat-messages').append(pending);pending.scrollIntoView({block:'nearest'});try{const result=await post('/chat',{message,history,lessonId:selectedLesson().id});if(revision===learningRevision)app.chat.push({role:'assistant',content:result.reply});}catch(e){if(revision===learningRevision)app.chat.push({role:'assistant',content:`I couldn't reach the learning service: ${e.message} Your lesson and phrase practice are still available.`});throw e;}finally{if(revision===learningRevision&&$('#chat-messages')){$('#chat-messages').innerHTML=chatMarkup();$('#chat-messages').scrollTop=$('#chat-messages').scrollHeight;}}},'Thinking…');
 }
 async function prepareVideo(button) {
- const l=selectedLesson(),language=getLanguage(),revision=learningRevision,key=courseKey(l.id,language),target=$('#video-container');await busy(button,async()=>{const progress=document.createElement('div');progress.className='video-progress';progress.setAttribute('role','status');progress.textContent='Preparing your animated lesson…';target?.append(progress);try{const video=await createLessonVideo(l,{onProgress:n=>{if(progress.isConnected)progress.textContent=`Preparing your animated lesson… ${Math.round(n*100)}%`;}});if(revision!==learningRevision||app.lessonSessions.get(key)?.lesson!==l){video.dispose?.();return;}app.videos.get(key)?.dispose?.();app.videos.set(key,video);const liveTarget=$('#video-container');if(liveTarget&&app.view==='learn'&&selectedLesson().id===l.id&&getLanguage()===language){liveTarget.innerHTML=videoMarkup(video,l);const player=liveTarget.querySelector('video');if(player)player.play().catch(()=>{});}}finally{progress.remove();}},'Preparing video…');
+ const l=selectedLesson(),language=getLanguage(),revision=learningRevision,generation=contentGeneration,key=courseKey(l.id,language),target=$('#video-container');await busy(button,async()=>{const progress=document.createElement('div');progress.className='video-progress';progress.setAttribute('role','status');progress.textContent='Preparing your animated lesson…';target?.append(progress);try{const video=await createLessonVideo(l,{onProgress:n=>{if(progress.isConnected)progress.textContent=`Preparing your animated lesson… ${Math.round(n*100)}%`;}});if(revision!==learningRevision||generation!==contentGeneration||app.lessonSessions.get(key)?.lesson!==l){video.dispose?.();return;}app.videos.get(key)?.dispose?.();app.videos.set(key,video);const liveTarget=$('#video-container');if(liveTarget&&app.view==='learn'&&selectedLesson().id===l.id&&getLanguage()===language){liveTarget.innerHTML=videoMarkup(video,l);const player=liveTarget.querySelector('video');if(player)player.play().catch(()=>{});}}finally{progress.remove();}},'Preparing video…');
 }
 function invalidateWritingFeedback(){if(!app.writingResult)return;app.writingResult=null;if($('#writing-feedback'))$('#writing-feedback').innerHTML='<div class="feedback-empty"><h3>Your draft has changed.</h3><p>Request fresh feedback when you are ready. Your new words are safely kept.</p></div>';}
 function updateDraft(text,keepFeedback=false) {if(!keepFeedback)invalidateWritingFeedback();app.writingText=text;if($('#writing-text')){$('#writing-text').value=text;$('#writing-count').textContent=`${countCharacters(text)} Chinese characters`;}persistDraft();}
@@ -282,6 +324,8 @@ document.addEventListener('click',async event=>{
  if(action==='retry-service')await init();
  else if(action==='stop-pronunciation')resetPronunciation(false);
  else if(action==='clear-pronunciation')resetPronunciation(true);
+ else if(action==='retry-guidance')await ensureLocalizedLearning(true);
+ else if(action==='start-next-learning'){const id=b.dataset.lessonId||selectedLesson().id;app.completedQuiz=null;app.quizResult=null;navigate('learn',id);await loadLesson(id,true);}
  else if(action==='generate-lesson')await loadLesson(currentStudyId(),false);
  else if(action==='refresh-lesson')await loadLesson(currentStudyId(),true);
  else if(action==='generate-exercises')await generateExercises(b,Boolean(b.dataset.refresh));
@@ -302,13 +346,13 @@ document.addEventListener('submit',async event=>{
  else if(f.id==='chat-form')await sendChat($('#chat-input').value,b);
  else if(f.id==='speaking-form')await busy(b,async()=>{const transcript=$('#spoken-transcript').value.trim(),l=selectedLesson(),index=app.phraseIndex,language=getLanguage(),revision=learningRevision,context=feedbackRevision,p=l.phrases[index%l.phrases.length];const result=await post('/speaking',{expected:p.hanzi,transcript,lessonId:l.id,language});if(revision===learningRevision&&context===feedbackRevision&&app.view==='speak'&&selectedLesson().id===l.id&&app.phraseIndex===index&&getLanguage()===language&&$('#speaking-result')){app.speakingResult=result;$('#speaking-result').innerHTML=speakingResults(result);}},'Reviewing your practice…');
  else if(f.id==='quiz-form')await busy(b,async()=>{
-   const l=selectedLesson(),language=getLanguage(),revision=learningRevision,set=app.exerciseSets.get(courseKey(l.id,language));
+   const l=selectedLesson(),language=getLanguage(),revision=learningRevision,set=app.exerciseSets.get(courseKey(l.id,language))||completedStudy(l.id)?.exerciseSet;
    if(!set)throw new Error('Create a practice set before checking your answers.');
    const data=new FormData(f),answers=set.questions.map(q=>({questionId:q.id,answer:Number(data.get(q.id))}));
    const result={...await post('/quiz',{exerciseSetId:set.id,lessonId:l.id,answers,language}),lessonId:l.id,exerciseSetId:set.id,language};
    if(revision!==learningRevision)return;
-   app.quizResult=result;
-   if(app.view==='learn'&&selectedLesson().id===l.id&&getLanguage()===language&&app.exerciseSets.get(courseKey(l.id,language))?.id===set.id&&$('#quiz-results'))$('#quiz-results').innerHTML=quizResults(result);
+   app.quizResult=result;app.completedQuiz={lesson:l,exerciseSet:set,result,language};
+   if(app.view==='learn'&&selectedLesson().id===l.id&&getLanguage()===language&&$('#quiz-results'))$('#quiz-results').innerHTML=quizResults(result);
    notify('Your practice evidence has been saved.');
  },'Reviewing your practice…');
  else if(f.id==='profile-form')await busy(b,async()=>{const data=Object.fromEntries(new FormData(f));data.dailyMinutes=Number(data.dailyMinutes);const language=(LANGUAGES.find(item=>item.name===data.nativeLanguage)||languageInfo(getLanguage())).code;const r=await api('/profile',{method:'PUT',body:JSON.stringify({...data,language})});clearGeneratedLearning();$('#settings-dialog').close();if(language!==getLanguage())switchLanguage(language);else render();showCoach('Your learning profile',r.profileInsight,r.recommendedFocus||r.nextStep);},'Saving…');
@@ -325,7 +369,7 @@ document.addEventListener('submit',async event=>{
    },'Reviewing your request…');}finally{app.planPending=false;if(revision===learningRevision)render();}
  }
 });
-document.addEventListener('change',e=>{if(e.target.id==='interface-language'){switchLanguage(e.target.value);return;}if(e.target.id==='pronunciation-rate'){app.pronunciationRate=e.target.value;return;}if(e.target.id==='lesson-select'){app.lessonId=e.target.value;app.phraseIndex=0;app.quizResult=null;app.speakingResult=null;render();}else if(e.target.id==='writing-topic'){persistDraft();app.writingLessonId=e.target.value;app.writingResult=null;render();}else if(e.target.id==='memory-filter'){const filter=e.target.value,all=app.state.memories||[];$('#memory-list').innerHTML=memoryCards(filter==='all'?all:filter==='superseded'?all.filter(m=>['superseded','archived'].includes(m.status)):all.filter(m=>memoryKind(m)===filter&&!['superseded','archived'].includes(m.status)));}});
+document.addEventListener('change',e=>{if(e.target.id==='interface-language'){switchLanguage(e.target.value);return;}if(e.target.id==='pronunciation-rate'){app.pronunciationRate=e.target.value;return;}if(e.target.id==='lesson-select'){app.lessonId=e.target.value;app.phraseIndex=0;app.completedQuiz=null;app.quizResult=null;app.speakingResult=null;render();}else if(e.target.id==='writing-topic'){persistDraft();app.writingLessonId=e.target.value;app.writingResult=null;render();}else if(e.target.id==='memory-filter'){const filter=e.target.value,all=app.state.memories||[];$('#memory-list').innerHTML=memoryCards(filter==='all'?all:filter==='superseded'?all.filter(m=>['superseded','archived'].includes(m.status)):all.filter(m=>memoryKind(m)===filter&&!['superseded','archived'].includes(m.status)));}});
 document.addEventListener('input',e=>{if(e.target.id==='plan-feedback-text'){app.planFeedbackText=e.target.value;return;}if(e.target.id==='pronunciation-text'){app.pronunciationText=e.target.value;return;}if(e.target.id==='writing-text'){invalidateWritingFeedback();app.writingText=e.target.value;$('#writing-count').textContent=`${countCharacters(app.writingText)} Chinese characters`;persistDraft();}});
 document.addEventListener('keydown',e=>{if(e.target.id==='chat-input'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#chat-form').requestSubmit();}});
 $('#settings-button').addEventListener('click',openSettings);
@@ -339,7 +383,7 @@ async function init(){if(connecting)return;connecting=true;try{await connectLear
 async function connectLearningService() {
  $('#view-root').innerHTML='<div class="app-loading"><span class="spinner"></span><p>Making a little room for Chinese…</p></div>';
  if(staticPagesMode){app.state=emptyLearningState();syncCatalogue();const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceNotConnected;restoreRoute();return;}
- try{const[state,health]=await Promise.all([api('/state'),api('/health')]);app.state=state.state||state;syncCatalogue();app.serviceUnavailable=false;const status=$('#api-status');status.innerHTML=`<span class="tiny-dot"></span>${health.configured?'Learning companion ready':'Companion setup needed'}`;status.title=health.configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';status.classList.remove('offline');if(health.configured)status.classList.add('connected');restoreRoute();}catch(e){if(configuredBackend){app.state=app.state||emptyLearningState();syncCatalogue();app.serviceUnavailable=true;const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceUnavailable;status.classList.remove('connected');status.classList.add('offline');restoreRoute();return;}$('#view-root').innerHTML=`<section class="card empty-state"><h1>Let's reconnect.</h1><p>${esc(e.message)}</p><p>Start the local server, then refresh this page.</p><button class="button button-primary" id="retry-connection">Try again</button></section>`;$('#retry-connection').addEventListener('click',()=>location.reload());}
+ try{const[state,health]=await Promise.all([api('/state'),api('/health')]);app.state=state.state||state;syncCatalogue();app.serviceUnavailable=false;const status=$('#api-status');status.innerHTML=`<span class="tiny-dot"></span>${health.configured?'Learning companion ready':'Companion setup needed'}`;status.title=health.configured?'Ready to connect when you request learning guidance.':'Set up your learning companion to get started.';status.classList.remove('offline');if(health.configured)status.classList.add('connected');restoreRoute();ensureLocalizedLearning();}catch(e){if(configuredBackend){app.state=app.state||emptyLearningState();syncCatalogue();app.serviceUnavailable=true;const status=$('#api-status');status.innerHTML='<span class="tiny-dot"></span>Pronunciation available';status.title=serviceUnavailable;status.classList.remove('connected');status.classList.add('offline');restoreRoute();return;}$('#view-root').innerHTML=`<section class="card empty-state"><h1>Let's reconnect.</h1><p>${esc(e.message)}</p><p>Start the local server, then refresh this page.</p><button class="button button-primary" id="retry-connection">Try again</button></section>`;$('#retry-connection').addEventListener('click',()=>location.reload());}
 }
 populateLanguageSelectors();
 observeTranslations();

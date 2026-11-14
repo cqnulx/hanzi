@@ -62,6 +62,18 @@ test('gateway does not accept non-local upstream destinations',()=>{
  assert.throws(()=>createGateway({allowedOrigin:'https://qiuxicqu.github.io/hanzi/'}),/origin only/);
 });
 
+test('learning-hint localization is forwarded for the allowed website with its isolated session',async()=>{
+ const f=await fixture();try{
+  const first=await f.request(),session=first.headers.get('x-hanzi-session');
+  const translated=await f.request('/api/localize-learning',{method:'POST',headers:{'X-Hanzi-Session':session},body:JSON.stringify({language:'ja'})});
+  assert.equal(translated.status,200);
+  assert.equal(f.calls.at(-1).url,'/api/localize-learning');
+  assert.deepEqual(JSON.parse(f.calls.at(-1).body),{language:'ja'});
+  assert.equal(f.calls.at(-1).headers.cookie,`hanzi_session=${session}`);
+  assert.equal((await f.request('/api/localize-learning',{method:'POST',headers:{Origin:'https://evil.example'},body:'{}'})).status,403);
+ }finally{await f.close();}
+});
+
 test('gateway reports its own teaching rejections with bounded input, excluding preflight and hostile traffic',async()=>{
  const reports=[],calls=[],session='a'.repeat(64);
  const gateway=createGateway({reportRejection:async record=>{reports.push(record);},fetchImpl:async(url,options)=>{calls.push({url,options});return new Response(JSON.stringify({error:'Backend already recorded this error.'}),{status:400,headers:{'Content-Type':'application/json'}});}}),base=await listen(gateway);
