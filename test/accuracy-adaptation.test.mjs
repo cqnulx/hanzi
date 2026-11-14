@@ -15,7 +15,7 @@ async function fixture(options={}){
  const server=createServer({apiKey:'test-key',storageDir:directory,lessons:[{...outline,level:options.level||outline.level}],fetchImpl:async(_,request)=>{
   const body=JSON.parse(request.body),payload=JSON.parse(body.messages[1].content);calls.push({payload,system:body.messages[0].content});let result;
   if(payload.task==='lesson')result=validLesson;
-  else if(payload.task==='exercises')result={questions:Array.from({length:4},(_,i)=>({question:`Choose ${i}`,options:['你好','再见','谢谢','不客气'],answer:0,explanation:'你好 is a greeting.'}))};
+  else if(payload.task==='exercises')result={questions:Array.from({length:4},(_,i)=>({question:`Choose ${i} for practice ${payload.practiceRound}`,options:['你好','再见','谢谢','不客气'],answer:0,explanation:'你好 is a greeting.'}))};
   else if(payload.task==='quiz'){
    const evidence=payload.difficultyEvidence,action=wrongDecision||(options.firstMaintain&&evidence?.attemptCount===1?'maintain':evidence?.allowedActions.find(value=>value!=='maintain'))||'maintain';
    const base=Number(evidence?.currentLevel?.slice(-1)||2),level=`HSK ${base+(action==='increase'?1:action==='decrease'?-1:0)}`;

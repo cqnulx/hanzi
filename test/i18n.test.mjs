@@ -77,3 +77,16 @@ test('bilingual lesson rendering preserves every answer index and skill identifi
  }
  assert.equal(getLocalizedLessons('en')[0].title,lessons[0].title);
 });
+
+test('adaptive practice labels and continuation errors follow every support language',()=>{
+ const messages=['ADAPTIVE PRACTICE','One question, then your next step.','Answered questions','Question','Transfer practice','Targeted support','Next question','Answer the current question before preparing the next one.','This practice has moved on. Continue with the latest question.','The learning service returned an invalid next question. Please prepare the practice again.'];
+ for(const language of LANGUAGES){
+  for(const message of messages){
+   const translated=translateText(message,language.code);
+   assert.ok(translated.trim(),`${language.code}: ${message}`);
+   if(language.code==='en')assert.equal(translated,message);
+   else if(!(language.code==='fr'&&message==='Question'))assert.notEqual(translated,message,`${language.code}: ${message}`);
+  }
+ }
+ assert.equal(translateText('Question','zh'),'题目');
+});

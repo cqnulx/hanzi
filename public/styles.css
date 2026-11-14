@@ -70,6 +70,18 @@ html[lang="zh-CN"] .greeting-hanzi{display:none}
 .quiz-score{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;margin-bottom:12px;border-radius:10px;background:#eef2e5}
 .quiz-score>div{display:grid;gap:4px}
 .quiz-score strong{font-size:38px;line-height:1.2}
+.practice-intro{margin-bottom:18px;line-height:1.8}
+.practice-question-meta{display:flex;flex-wrap:wrap;gap:9px;margin:16px 0 12px}
+.practice-intent{line-height:1.8;margin-bottom:18px}
+.quiz-next-step{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:20px;margin-bottom:20px;border:1px solid #a7bf93;border-radius:10px;background:#f3f6eb}
+.quiz-next-step h3{margin-bottom:8px}
+.quiz-next-step p{margin:0;line-height:1.8}
+.quiz-next-step .button{flex-shrink:0}
+.quiz-review-heading{padding-top:20px;margin-top:20px;border-top:1px solid var(--line)}
+.practice-history{padding:14px 18px;border:1px solid var(--line);border-radius:10px;margin:18px 0}
+.practice-history summary{cursor:pointer;font-size:18px;font-weight:600}
+.practice-history article{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);line-height:1.8}
+.quiz-question:disabled{opacity:1}
 
 /* Font-size adjustment: +3px, applied once. */
 

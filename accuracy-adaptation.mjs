@@ -11,7 +11,10 @@ export function performanceEvidence(state,exerciseSet,results,baseLevel){
  const current={exerciseSetId:exerciseSet.id,lessonId:exerciseSet.lessonId,level:`HSK ${levelNumber(exerciseSet.level||baseLevel)}`,correct:results.filter(item=>item.correct).length,total:results.length,timestamp:new Date().toISOString()};
  current.accuracy=Math.round(current.correct/current.total*100);
  const previous=(state.quizPerformance||[]).filter(item=>item.exerciseSetId!==exerciseSet.id);
- const history=[...previous,current].slice(-30),recent=history.slice(-5);
+ const history=[...previous,current].slice(-30),recent=[];let recentQuestionCount=0;
+ // Keep the former five four-question sets, while allowing single-question
+ // practice to accumulate the same twenty-question evidence window.
+ for(const attempt of [...history].reverse())if(recent.length<20&&recentQuestionCount<20){recent.unshift(attempt);recentQuestionCount+=attempt.total;}
  const total=recent.reduce((sum,item)=>sum+item.total,0),correct=recent.reduce((sum,item)=>sum+item.correct,0),accuracy=Math.round(correct/total*100);
  const level=levelNumber(baseLevel),atCurrentLevel=recent.filter(item=>levelNumber(item.level)===level);
  const currentTotal=atCurrentLevel.reduce((sum,item)=>sum+item.total,0),currentCorrect=atCurrentLevel.reduce((sum,item)=>sum+item.correct,0);
@@ -19,7 +22,7 @@ export function performanceEvidence(state,exerciseSet,results,baseLevel){
  const canDecrease=level>1&&total>=4&&correct/total<=0.5&&currentTotal>=4&&currentCorrect/currentTotal<=0.5;
  const sustainedLow=canDecrease&&atCurrentLevel.length>=2&&currentTotal>=8;
  const allowedActions=canIncrease?['increase']:sustainedLow?['decrease']:['maintain',...(canDecrease?['decrease']:[])];
- return {history,current,evidence:{currentLevel:`HSK ${level}`,correct,total,accuracy,attemptCount:recent.length,recentAttempts:recent,currentLevelAttemptCount:atCurrentLevel.length,currentLevelQuestions:currentTotal,allowedActions,allowedLevels:allowedActions.map(action=>`HSK ${level+(action==='increase'?1:action==='decrease'?-1:0)}`),note:'First answers only. At most five recent sets. At least two sets/eight questions at the current level with 85% accuracy both overall and at that level requires a one-step increase. At least two sets/eight questions at the current level with 50% or less accuracy both overall and at that level requires a one-step decrease. A single low set of at least four answers permits either maintenance or a decrease. Obey the sole allowed action when only one is supplied; do not use insufficient-sample reasoning to maintain after the sustained-evidence threshold. HSK 1 and HSK 6 remain boundaries, and unknown topics still need a foundation check.'}};
+ return {history,current,evidence:{currentLevel:`HSK ${level}`,correct,total,accuracy,attemptCount:recent.length,recentAttempts:recent,currentLevelAttemptCount:atCurrentLevel.length,currentLevelQuestions:currentTotal,allowedActions,allowedLevels:allowedActions.map(action=>`HSK ${level+(action==='increase'?1:action==='decrease'?-1:0)}`),note:'First answers only. Use the most recent whole sets covering twenty questions, at most twenty sets (five sets for four-question practice). At least two sets/eight questions at the current level with 85% accuracy both overall and at that level requires a one-step increase. At least two sets/eight questions at the current level with 50% or less accuracy both overall and at that level requires a one-step decrease. A single low set of at least four answers permits either maintenance or a decrease. Obey the sole allowed action when only one is supplied; do not use insufficient-sample reasoning to maintain after the sustained-evidence threshold. HSK 1 and HSK 6 remain boundaries, and unknown topics still need a foundation check.'}};
 }
 export function validateDifficultyAdjustment(value,evidence,previous,sourceExerciseSetId,language){
  const invalid=()=>Object.assign(new Error('The learning service returned an invalid difficulty adjustment. Please try again.'),{status:502});

@@ -37,6 +37,11 @@ function wasMeasured(state,set){
   const ids=new Set((state.quizAttempts?.[set.lessonId]?.results||[]).map(item=>item.questionId));
   return set.questions.length>0&&set.questions.every(question=>ids.has(question.id));
 }
+// Compare actual question wording, ignoring presentation-only numbering,
+// punctuation and whitespace. Repeated vocabulary/options are valid at HSK 1.
+function questionWording(value){
+  return normalize(String(value).normalize('NFKC').replace(/^\s*(?:(?:question|item|q)\s*\d+\s*[:.)、-]?|第\s*[\d一二三四五六七八九十]+\s*题\s*[:：、]?|\d+\s*[.)、])\s*/iu,''));
+}
 function validateLesson(result,outline,model,language){
   const item=result.lesson&&typeof result.lesson==='object'?result.lesson:result;
   const translated=(value,max)=>language==='en'?generatedText(value?.english,'English translation',max):['zh','en'].includes(language)?text(value?.translation,max)||generatedText(value?.english,'English translation',max):generatedText(value?.translation,'support-language translation',max);
@@ -269,33 +274,86 @@ export function createServer(options={}) {
           const lesson={...validateLesson(result,teachingOutline,model,language),difficultyRevision:difficultyRevision(state)};state.aiLessons=state.aiLessons||{};state.aiLessons[cacheKey]=lesson;
           const custom=state.customLessons.find(item=>item.id===outline.id);
           if(custom){custom.translations=custom.translations||{};custom.translations[language]={title:lesson.title,subtitle:lesson.subtitle,description:lesson.description,objectives:lesson.objectives};}
-          // A regenerated lesson needs questions grounded in the new examples.
-          if(state._private?.exerciseSets)state._private.exerciseSets=state._private.exerciseSets.filter(set=>wasMeasured(state,set)||set.lessonId!==outline.id||set.language!==language);
+          // Legacy batches follow the regenerated lesson. Keep a pending adaptive
+          // question at the current target so reloading a lesson cannot skip it.
+          if(state._private?.exerciseSets)state._private.exerciseSets=state._private.exerciseSets.filter(set=>wasMeasured(state,set)||set.lessonId!==outline.id||set.language!==language||(set.adaptive&&(set.difficultyRevision||0)===difficultyRevision(state)));
           await save(id,state);return send(200,{lesson,model,mode:'live',generatedAt:lesson.generatedAt,state});
         }
         if(route==='/api/exercises'&&req.method==='POST'){
           const outline=catalogue.find(l=>l.id===input.lessonId);if(!outline)throw fail(400,'Choose an available lesson.');
-          const language=normalizeLanguage(input.language);
+          const language=normalizeLanguage(input.language),adaptive=input.adaptive===true;
           const privateState=state._private||(state._private={});const sets=privateState.exerciseSets||(privateState.exerciseSets=[]);
-          const cached=[...sets].reverse().find(set=>set.lessonId===outline.id&&set.language===language&&!wasMeasured(state,set)&&(set.difficultyRevision||0)===difficultyRevision(state));
-          const publicSet=set=>({id:set.id,lessonId:set.lessonId,language:set.language,level:set.level,difficultyRevision:set.difficultyRevision||0,questions:set.questions.map(({answer,explanation,...question})=>question),generatedAt:set.generatedAt,model:set.model});
-          if(cached&&!input.refresh)return send(200,{exerciseSet:publicSet(cached),model:cached.model,mode:'cached',state});
+          const publicSet=set=>({id:set.id,lessonId:set.lessonId,language:set.language,level:set.level,difficultyRevision:set.difficultyRevision||0,...(set.adaptive?{adaptive:true,questionNumber:set.questionNumber,previousExerciseSetId:set.previousExerciseSetId,teachingIntent:set.teachingIntent,intentReason:set.intentReason}:{}),questions:set.questions.map(({answer,explanation,...question})=>question),generatedAt:set.generatedAt,model:set.model});
+          const currentAdaptive=[...sets].reverse().find(set=>set.lessonId===outline.id&&set.adaptive);
+          let previousSet=null,resumable=null;
+          if(adaptive){
+            if(input.previousExerciseSetId){
+              previousSet=sets.find(set=>set.id===input.previousExerciseSetId&&set.lessonId===outline.id&&set.adaptive);
+              if(!previousSet||!wasMeasured(state,previousSet))throw fail(409,'Answer the current question before preparing the next one.');
+              if(currentAdaptive?.id!==previousSet.id){
+                if(currentAdaptive?.previousExerciseSetId===previousSet.id&&!wasMeasured(state,currentAdaptive))resumable=currentAdaptive;
+                else throw fail(409,'This practice has moved on. Continue with the latest question.');
+              }
+            }else if(currentAdaptive){
+              if(wasMeasured(state,currentAdaptive))previousSet=currentAdaptive;
+              else resumable=currentAdaptive;
+            }
+            // Double clicks and reloads resume the same unanswered question. A
+            // language change can replace it, but cannot create another answer.
+            if(resumable){
+              if(resumable.language===language)return send(200,{exerciseSet:publicSet(resumable),model:resumable.model,mode:'cached',state});
+              previousSet=sets.find(set=>set.id===resumable.previousExerciseSetId)||null;
+            }
+          }
+          const lastAttemptAt=Date.parse(state.quizAttempts?.[outline.id]?.timestamp||'')||0;
+          const cached=[...sets].reverse().find(set=>set.lessonId===outline.id&&set.language===language&&!set.adaptive&&!wasMeasured(state,set)&&(set.difficultyRevision||0)===difficultyRevision(state)&&(!lastAttemptAt||Date.parse(set.generatedAt)>lastAttemptAt));
+          if(!adaptive&&cached&&!input.refresh)return send(200,{exerciseSet:publicSet(cached),model:cached.model,mode:'cached',state});
           const currentLesson=state.aiLessons?.[`${outline.id}:${language}`];
           const lessonContext=currentLesson&&(currentLesson.difficultyRevision||0)===difficultyRevision(state)?currentLesson:{title:outline.title,description:outline.description,phrases:outline.phrases,level:teachingLevel(state,outline)};
-          const result=await ask('Generate exactly 4 NEW varied multiple-choice Chinese learning questions adapted to the learner and supplied lesson. Use interpretation and application, not four rephrasings of one item. Every item must have exactly 4 distinct options and exactly one unambiguously correct answer; answer is zero-based integer 0..3. Avoid trick questions. Implement the supplied lesson.level teaching difficulty and learningDifficulty.focus in the actual question complexity, vocabulary and scaffolding. A prior outline or learner profile must not override the current teaching target. Unknown topics need a foundation check even after success elsewhere. Explain why the answer is correct. JSON {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}. Question and explanation follow interface language; Chinese examples remain Chinese.',{task:'exercises',lesson:lessonContext,learningDifficulty:state.learningDifficulty||null,profile:state.profile,mastery:state.mastery[outline.id]||null,memories:relevantMemories(state,outline.title),avoidQuestions:sets.filter(s=>s.lessonId===outline.id).slice(-2).flatMap(s=>s.questions.map(q=>q.question))},language,4500);
-          const questions=generatedArray(result.questions,'exercise questions',4,4).map(q=>{
-            const options=generatedArray(q?.options,'answer options',4,4).map(v=>generatedText(v,'answer option',700));
-            if(new Set(options.map(normalize)).size!==4||!Number.isInteger(q.answer)||q.answer<0||q.answer>3)throw fail(502,'The learning service returned an invalid exercise. Please prepare the practice again.');
-            return{id:randomUUID(),conceptId:outline.id,question:generatedText(q.question,'exercise question',1800),options,answer:q.answer,explanation:generatedText(q.explanation,'answer explanation',1800)};
-          });
-          const exerciseSet={id:randomUUID(),lessonId:outline.id,language,level:teachingLevel(state,outline),difficultyRevision:difficultyRevision(state),questions,generatedAt:new Date().toISOString(),model};
-          sets.push(exerciseSet);privateState.exerciseSets=sets.slice(-12);
+          const recentSets=[];let recentQuestionCount=0;
+          for(const set of [...sets].reverse())if(set.lessonId===outline.id&&recentQuestionCount<20){recentSets.unshift(set);recentQuestionCount+=set.questions.length;}
+          const recentExercises=recentSets.map(set=>({language:set.language,level:set.level,questions:set.questions.map(q=>({question:q.question,options:q.options,correctAnswer:q.options[q.answer]}))}));
+          const avoidQuestions=recentSets.flatMap(set=>set.questions.map(q=>q.question));
+          const practiceRound=(Number.isSafeInteger(privateState.exerciseRound)?privateState.exerciseRound:sets.length)+1;
+          const previousResult=previousSet?(state.quizAttempts?.[outline.id]?.results||[]).find(item=>item.questionId===previousSet.questions[0]?.id):null;
+          const previousQuestion=previousSet?{question:previousSet.questions[0].question,options:previousSet.questions[0].options,selectedAnswer:previousResult?previousSet.questions[0].options[previousResult.answer]:null,correctAnswer:previousSet.questions[0].options[previousSet.questions[0].answer],correct:previousResult?.correct??null,explanation:previousResult?.explanation||previousSet.questions[0].explanation}:null;
+          const questionNumber=adaptive?(previousSet?.questionNumber||0)+1:null;
+          const generationContext={task:'exercises',adaptive,questionCount:adaptive?1:4,questionNumber,lesson:lessonContext,practiceRound,previousQuestion,recentAccuracy:(state.quizPerformance||[]).slice(-20),learningDifficulty:state.learningDifficulty||null,profile:state.profile,mastery:state.mastery[outline.id]||null,memories:relevantMemories(state,outline.title),recentExercises,avoidQuestions};
+          const previousWordings=new Set(avoidQuestions.map(questionWording));
+          let questions,teachingIntent,intentReason,validationFeedback=null;
+          for(let attempt=0;attempt<2;attempt++){
+            const adaptiveInstruction=adaptive?' Generate exactly ONE question. Decide the next teaching move from previousQuestion and checked recentAccuracy: after a mistake, use consolidate with a new example, a shorter sentence or clearer clues; after a correct answer, choose transfer or challenge using a different practical situation at the current lesson.level; for the first question choose foundation with a randomly chosen relevant situation. Vary the skill and task style across questions. Do not issue a fixed sequence or plan all future questions in advance. Your response MUST contain all three top-level fields teachingIntent, intentReason and questions, including for the first foundation question. intentReason is a concise learner-facing reason in the selected support language grounded in the previous answer; never claim a random untested skill was mastered.':' Generate exactly 4 questions.';
+            const responseSchema=adaptive?'JSON {"teachingIntent":"foundation|transfer|consolidate|challenge","intentReason":"brief reason in the selected support language","questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}.':'JSON {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}.';
+            const result=await ask('Generate NEW varied multiple-choice Chinese learning questions adapted to the learner and supplied lesson.'+adaptiveInstruction+' Each practiceRound is a new test, including when the teaching level stays the same. Use new concrete situations, example sentences and tested details compared with recentExercises and avoidQuestions; do not repeat a previous question by changing numbering, punctuation, interface language or option order. Revisit a weak skill with a different example. Reusing basic words is allowed, but merely renaming a round is not a new question. Use interpretation and application, not four rephrasings of one item. If validationFeedback is supplied, correct all reported missing fields or invalid values and replace any repeated questions with genuinely different examples. Every item must have exactly 4 distinct options and exactly one unambiguously correct answer; answer is zero-based integer 0..3. Avoid trick questions. Implement the supplied lesson.level teaching difficulty and learningDifficulty.focus in the actual question complexity, vocabulary and scaffolding. A prior outline or learner profile must not override the current teaching target. Unknown topics need a foundation check even after success elsewhere. Explain why the answer is correct. '+responseSchema+' Question, intentReason and explanation follow interface language; Chinese examples remain Chinese.',{...generationContext,validationFeedback},language,adaptive?1800:4500);
+            questions=generatedArray(result.questions,'exercise questions',adaptive?1:4,adaptive?1:4).map(q=>{
+              const options=generatedArray(q?.options,'answer options',4,4).map(v=>generatedText(v,'answer option',700));
+              if(new Set(options.map(normalize)).size!==4||!Number.isInteger(q.answer)||q.answer<0||q.answer>3)throw fail(502,'The learning service returned an invalid exercise. Please prepare the practice again.');
+              return{id:randomUUID(),conceptId:outline.id,question:generatedText(q.question,'exercise question',1800),options,answer:q.answer,explanation:generatedText(q.explanation,'answer explanation',1800)};
+            });
+            if(adaptive){
+              teachingIntent=result.teachingIntent;intentReason=text(result.intentReason,1500);
+              const allowedIntents=!previousQuestion?['foundation']:previousQuestion.correct===false?['consolidate']:['transfer','challenge','consolidate'];
+              if(!intentReason||!allowedIntents.includes(teachingIntent)){
+                if(attempt===1){generatedText(result.intentReason,'next question reason',1500);throw fail(502,'The learning service returned an invalid next question. Please prepare the practice again.');}
+                validationFeedback={reason:'Return a complete replacement JSON object with all required top-level fields. Supply a nonempty learner-facing intentReason in the selected support language and choose one of allowedTeachingIntents.',requiredFields:['teachingIntent','intentReason','questions'],allowedTeachingIntents:allowedIntents};
+                continue;
+              }
+            }
+            const currentWordings=new Set(),repeatedQuestions=[];
+            for(const question of questions){const key=questionWording(question.question);if(previousWordings.has(key)||currentWordings.has(key))repeatedQuestions.push(question.question);currentWordings.add(key);}
+            if(!repeatedQuestions.length)break;
+            if(attempt===1)throw fail(502,'The learning service repeated earlier questions. Please prepare a new practice set again.');
+            validationFeedback={reason:'Repeated question wording is not a new test. Replace these with different situations and example sentences while keeping the current difficulty.',repeatedQuestions};
+          }
+          const exerciseSet={id:randomUUID(),lessonId:outline.id,language,level:teachingLevel(state,outline),difficultyRevision:difficultyRevision(state),...(adaptive?{adaptive:true,questionNumber,previousExerciseSetId:previousSet?.id||null,teachingIntent,intentReason}:{}),questions,generatedAt:new Date().toISOString(),model};
+          sets.push(exerciseSet);privateState.exerciseSets=sets.slice(-32);privateState.exerciseRound=practiceRound;
           await save(id,state);return send(200,{exerciseSet:publicSet(exerciseSet),model,mode:'live',state});
         }
         if(route==='/api/quiz'&&req.method==='POST'){
           const lesson=catalogue.find(l=>l.id===input.lessonId);
           const exerciseSet=state._private?.exerciseSets?.find(set=>set.id===input.exerciseSetId&&set.lessonId===input.lessonId);
           if(!lesson||!exerciseSet)throw fail(400,'Generate a practice set for this lesson before submitting answers.');
+          if(exerciseSet.adaptive&&!wasMeasured(state,exerciseSet)&&[...state._private.exerciseSets].reverse().find(set=>set.lessonId===lesson.id&&set.adaptive)?.id!==exerciseSet.id)throw fail(409,'This practice has moved on. Continue with the latest question.');
           if(!Array.isArray(input.answers)||input.answers.length!==exerciseSet.questions.length)throw fail(400,'Answer every question before checking this quiz.');
           const seen=new Set(),results=[];
           for(const answer of input.answers){
@@ -402,7 +460,7 @@ export function createServer(options={}) {
           if(feedback||adaptation){
             const adjustedIds=new Set(plan.map(step=>step.lessonId));
             for(const key of Object.keys(state.aiLessons||{}))if(adjustedIds.has(key.split(':')[0]))delete state.aiLessons[key];
-            if(state._private?.exerciseSets)state._private.exerciseSets=state._private.exerciseSets.filter(set=>!adjustedIds.has(set.lessonId));
+            if(state._private?.exerciseSets)state._private.exerciseSets=state._private.exerciseSets.filter(set=>wasMeasured(state,set)||!adjustedIds.has(set.lessonId));
           }
           state.plan=plan;state.planAdaptation=adaptation;state.planDifficultyRevision=difficultyRevision(state);state.planMode='live';state.planModel=model;state.planLanguage=language;state.planSummary=summary;state.planGeneratedAt=new Date().toISOString();
           await save(id,state);return send(200,{plan,summary,addedLesson,adaptation,model,mode:'live',generatedAt:state.planGeneratedAt,state});
