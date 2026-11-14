@@ -52,6 +52,8 @@ html[lang="zh-CN"] .greeting-hanzi{display:none}
 .language-option.is-active,.language-option[aria-pressed="true"]{background:#fffefa;border-color:#dce5d0;color:#365b2c;box-shadow:0 1px 4px #173e350a}
 .language-option:focus-visible{outline:2px solid #c68a5e;outline-offset:3px}
 .topbar-actions{flex-wrap:nowrap}
+.interface-language-select{min-height:36px;max-width:166px;width:auto;border:0;border-radius:5px;background:#fffefa;padding:6px 28px 6px 11px;font-size:16px;line-height:1.5;cursor:pointer}
+.interface-language-select:focus-visible{outline:2px solid #c68a5e;outline-offset:3px}
 
 /* Font-size adjustment: +3px, applied once. */
 

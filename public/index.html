@@ -35,7 +35,7 @@
         <div class="sidebar-bottom">
           <button type="button" class="profile-chip" id="profile-open" aria-label="Open learner profile">
             <span class="avatar" id="profile-avatar">A</span>
-            <span class="profile-chip-copy"><strong id="profile-name">Alex</strong><span id="profile-level">HSK 2 learner</span></span>
+            <span class="profile-chip-copy"><strong id="profile-name" data-no-translate>Alex</strong><span id="profile-level">HSK 2 learner</span></span>
             <svg class="profile-settings-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
           </button>
           <div class="local-label"><span class="status-dot"></span>Local learning space</div>
@@ -47,10 +47,7 @@
           <div class="topbar-location"><span class="topbar-square" aria-hidden="true">H</span><span>My space</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb">Overview</strong></div>
           <div class="topbar-actions">
             <span class="api-status" id="api-status"><span class="status-dot"></span>Connecting</span>
-            <div class="language-toggle" id="language-toggle" role="group" aria-label="Choose interface language">
-              <button class="language-option is-active" type="button" data-language="en" lang="en" aria-pressed="true">EN</button>
-              <button class="language-option" type="button" data-language="zh" lang="zh-CN" aria-pressed="false">中文</button>
-            </div>
+            <label class="language-toggle" id="language-toggle"><span class="sr-only">Interface language</span><select id="interface-language" class="interface-language-select" aria-label="Interface language"><option value="en" lang="en" data-no-translate>English</option></select></label>
             <button class="icon-button settings-button" id="settings-button" type="button" aria-label="Learner settings" title="Learner settings"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m10 3-.5 2.1-2 .9-1.9-.6-2 3.4 1.5 1.5v2.4l-1.5 1.5 2 3.4 2-.6 1.9.9.5 2.1h4l.5-2.1 2-.9 1.9.6 2-3.4-1.5-1.5v-2.4l1.5-1.5-2-3.4-2 .6-1.9-.9L14 3h-4Z"/><circle cx="12" cy="11.5" r="3"/></svg></button>
           </div>
         </header>
@@ -69,7 +66,7 @@
       <form id="profile-form">
         <div class="form-grid">
           <label class="field">Your name<input class="input" name="name" id="learner-name" maxlength="60" autocomplete="given-name" value="Alex" required /></label>
-          <label class="field">Support language<select class="input" name="nativeLanguage" id="learner-language"><option value="English">English</option></select></label>
+          <label class="field">Support language<select class="input" name="nativeLanguage" id="learner-language"><option value="English" data-no-translate>English</option></select></label>
           <label class="field">Current Chinese level<select class="input" name="level" id="learner-level"><option value="HSK 1">HSK 1 · Just beginning</option><option value="HSK 2" selected>HSK 2 · Building foundations</option><option value="HSK 3">HSK 3 · Everyday confidence</option><option value="HSK 4">HSK 4 · Independent learner</option><option value="HSK 5">HSK 5 · Advanced</option><option value="HSK 6">HSK 6 · Proficient</option></select></label>
           <label class="field">Daily practice<select class="input" name="dailyMinutes" id="learner-minutes"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
         </div>

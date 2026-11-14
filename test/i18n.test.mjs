@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { translateText } from '../public/i18n.js';
+import { translateText,getLanguage,setLanguage } from '../public/i18n.js';
+import { LANGUAGES,normalizeLanguage,languageInfo } from '../public/languages.js';
+import { locales } from '../public/locales.js';
 import { lessons, getLocalizedLessons } from '../public/content.js';
 
 test('interface language changes common labels and dynamic counters without changing unknown learner text',()=>{
@@ -10,6 +12,51 @@ test('interface language changes common labels and dynamic counters without chan
  assert.equal(translateText('Hello, Alex.','zh'),'你好，Alex。');
  assert.equal(translateText('Writing desk','en'),'Writing desk');
  assert.equal(translateText('My original draft should stay unchanged.','zh'),'My original draft should stay unchanged.');
+});
+test('seven support languages translate navigation and preserve Chinese and learner text',()=>{
+ assert.deepEqual(LANGUAGES.map(item=>item.code),['zh','en','es','fr','de','ja','ko']);
+ for(const language of LANGUAGES){
+  assert.equal(setLanguage(language.code),language.code);
+  assert.equal(getLanguage(),language.code);
+  assert.ok(languageInfo(language.code).locale);
+  const label=translateText('Writing desk');
+  assert.ok(label.length>0);
+  if(language.code!=='en')assert.notEqual(label,'Writing desk');
+  assert.equal(translateText('我喜欢学习中文。'), '我喜欢学习中文。');
+  assert.equal(translateText('nǐ hǎo, Zhōngguó'), 'nǐ hǎo, Zhōngguó');
+  assert.equal(translateText('My own sentence about Madrid 42.'),'My own sentence about Madrid 42.');
+ }
+ assert.equal(setLanguage('unsupported'),'en');
+ assert.equal(normalizeLanguage(null),'en');
+ assert.equal(translateText('Writing desk','unsupported'),'Writing desk');
+});
+test('additional languages preserve variable values while translating dynamic messages',()=>{
+ for(const language of ['es','fr','de','ja','ko']){
+  const greeting=translateText('Hello, Alex $&. ',language);
+  assert.ok(greeting.includes('Alex $&'));
+  assert.ok(greeting.endsWith(' '));
+  assert.notEqual(greeting,'Hello, Alex $&. ');
+  const counter=translateText('Phrase 3 of 17',language);
+  assert.ok(counter.includes('3')&&counter.includes('17'));
+  assert.notEqual(counter,'Phrase 3 of 17');
+  const evidence=translateText('24 learning memories · 6 checked answers',language);
+  assert.ok(evidence.includes('24')&&evidence.includes('6'));
+  assert.ok(!evidence.includes('{'));
+  const listen=translateText('Listen to 你好！',language);
+  assert.ok(listen.includes('你好！'));
+  assert.notEqual(listen,'Listen to 你好！');
+ }
+});
+test('new language packs contain the same messages and preserve all template placeholders',()=>{
+ const keys=Object.keys(locales.es);
+ for(const [language,dictionary]of Object.entries(locales)){
+  assert.deepEqual(Object.keys(dictionary),keys,language);
+  for(const key of keys){
+   assert.ok(dictionary[key]?.trim(),`${language}: ${key}`);
+   const placeholders=value=>[...value.matchAll(/\{\w+\}/g)].map(match=>match[0]).sort();
+   assert.deepEqual(placeholders(dictionary[key]),placeholders(key),`${language}: ${key}`);
+  }
+ }
 });
 test('bilingual lesson rendering preserves every answer index and skill identifier',()=>{
  const chinese=getLocalizedLessons('zh');

@@ -1,9 +1,17 @@
 // UI translations stay local; switching language never sends a model request.
+import {locales} from './locales.js';
+import {normalizeLanguage,languageInfo} from './languages.js';
 let currentLanguage='en';
-try{currentLanguage=localStorage.getItem('hanzi-interface-language')==='zh'?'zh':'en';}catch{}
+try{currentLanguage=normalizeLanguage(localStorage.getItem('hanzi-interface-language'));}catch{}
 export const getLanguage=()=>currentLanguage;
-export function setLanguage(language){currentLanguage=language==='zh'?'zh':'en';try{localStorage.setItem('hanzi-interface-language',currentLanguage);}catch{}return currentLanguage;}
+export function setLanguage(language){currentLanguage=normalizeLanguage(language);try{localStorage.setItem('hanzi-interface-language',currentLanguage);}catch{}return currentLanguage;}
 const zh={
+ 'No specific corrections suggested. Try expanding your idea with another sentence.':'暂无需要修改的地方。可以再写一句，展开你的想法。',
+ 'Interface language':'界面语言','Language':'语言','Choose your support language':'选择辅助语言','Custom ·':'定制 ·',
+ 'Feedback in your support language · corrections in Chinese':'用辅助语言解释 · 用中文修改',
+ 'Clear explanations in your support language':'使用你的辅助语言清楚解释','A little every day.':'每天进步一点。',
+ 'CAPTIONED PHRASE LESSON':'带字幕的短句课程','Captioned phrase lesson':'带字幕的短句课程',
+ 'Listen to phrase audio below':'在下方听短句发音','Practise this phrase, then make it your own.':'练习这个短句，再试着表达自己的意思。',
  'New course added':'新课程已加入',
  'Custom course':'定制课程',
  'Existing course updated':'已调整现有课程',
@@ -141,9 +149,47 @@ const zh={
  'Making a little room for Chinese…':'正在准备你的中文学习空间…',"Let's reconnect.":'重新连接一下。','Start the local server, then refresh this page.':'请启动本地服务，然后刷新页面。','Try again':'重试','Made for a world of Chinese learners.':'为世界各地的中文学习者而设计。','Keep growing.':'持续成长。','Please enable JavaScript to use your Hanzi learning companion.':'请启用 JavaScript，以使用 Hanzi 中文伴学网页。',
  'HSK 1 · Just beginning':'HSK 1 · 刚刚起步','HSK 2 · Building foundations':'HSK 2 · 夯实基础','HSK 3 · Everyday confidence':'HSK 3 · 日常交流','HSK 4 · Independent learner':'HSK 4 · 独立学习','HSK 5 · Advanced':'HSK 5 · 进阶提升','HSK 6 · Proficient':'HSK 6 · 熟练运用',
 };
+const dynamicMessages=[
+ 'Hello, {name}.','{count} min goal','{level} · {count} minutes a day · Your pace',
+ '{count} minutes a day · {suffix}','{count} Chinese characters','Phrase {number} of {total}',
+ '{count} checked answers','{count}% confidence',
+ '{count} learning memories help your companion understand your journey.','Preparing your animated lesson… {count}%',
+ '{count} learning memories · {checked} checked answers','Open {title}','Listen to {phrase}',
+ '{count} / {total} target characters matched',
+ 'Hi {name}! Ask me about a phrase, try your own sentence, or tell me what feels tricky. We can take it step by step.',
+ '{count} memories · {level} · {goal}','{type} · {count} MIN','/ {count} min','{count} min','{count} minutes',
+ 'Based on {count} checked practice answers; revisit this skill before moving on.',
+ '{count}% BKT estimate · {status}',
+].map(source=>{
+ const slots=[];let position=0,pattern='^';
+ const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ for(const match of source.matchAll(/\{(\w+)\}/g)){
+  pattern+=escape(source.slice(position,match.index));
+  slots.push(match[1]);pattern+=['count','number','total','checked'].includes(match[1])?'(\\d+)':'(.+?)';
+  position=match.index+match[0].length;
+ }
+ return {source,slots,pattern:new RegExp(pattern+escape(source.slice(position))+'$')};
+});
+function translateAdditionalLanguage(key,language){
+ const dictionary=locales[language];
+ if(!dictionary)return undefined;
+ if(dictionary[key]!==undefined)return dictionary[key];
+ if(/^The learning service returned (?:incomplete|invalid) .+\. Please try again\.$/.test(key))return dictionary['The learning content is incomplete. Please try again.'];
+ if(/^Mandarin playback could not finish \(.+\)\.$/.test(key))return dictionary['Mandarin playback could not finish.'];
+ for(const {source,slots,pattern}of dynamicMessages){
+  const match=key.match(pattern),template=dictionary[source];if(!match||!template)continue;
+  const values=Object.fromEntries(slots.map((slot,index)=>{
+   const value=match[index+1];
+   return [slot,['suffix','type','status','title'].includes(slot)?dictionary[value]||value:value];
+  }));
+  return template.replace(/\{(\w+)\}/g,(_,slot)=>values[slot]);
+ }
+}
 export function translateText(value,language=currentLanguage){
- if(language!=='zh'||typeof value!=='string'||!value.trim())return value;
- const key=value.trim();let translated=zh[key];
+ language=normalizeLanguage(language);
+ if(language==='en'||typeof value!=='string'||!value.trim())return value;
+ const key=value.trim();let translated=language==='zh'?zh[key]:translateAdditionalLanguage(key,language);
+ if(language!=='zh')return translated===undefined?value:value.replace(key,()=>translated);
  if(translated===undefined){
   const rules=[
    [/^The learning service returned (?:incomplete|invalid) .+\. Please try again\.$/,()=> '学习内容不完整，请重试。'],
@@ -167,12 +213,12 @@ export function translateText(value,language=currentLanguage){
   ];
   for(const[pattern,replace]of rules)if(pattern.test(key)){translated=key.replace(pattern,replace);break;}
  }
- return translated===undefined?value:value.replace(key,translated);
+ return translated===undefined?value:value.replace(key,()=>translated);
 }
 const textSources=new WeakMap(),attributeSources=new WeakMap();
 export function applyTranslations(root=document.body){
  if(!root)return;
- document.documentElement.lang=currentLanguage==='zh'?'zh-CN':'en';
+ document.documentElement.lang=languageInfo(currentLanguage).locale;
  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
  let node;
  while((node=walker.nextNode())){
@@ -182,6 +228,7 @@ export function applyTranslations(root=document.body){
   const translated=translateText(record.source);record.rendered=translated;textSources.set(node,record);if(value!==translated)node.nodeValue=translated;
  }
  for(const element of root.querySelectorAll('[placeholder],[aria-label],[title]')){
+  if(element.closest('[data-no-translate]'))continue;
   let records=attributeSources.get(element);if(!records){records={};attributeSources.set(element,records);}
   for(const attr of ['placeholder','aria-label','title']){
    const value=element.getAttribute(attr);if(value===null)continue;let record=records[attr];
@@ -190,7 +237,8 @@ export function applyTranslations(root=document.body){
   }
  }
  document.querySelectorAll('[data-language]').forEach(button=>{const active=button.dataset.language===currentLanguage;button.classList.toggle('is-active',active);button.setAttribute('aria-pressed',String(active));});
- document.title=currentLanguage==='zh'?'Hanzi 汉知 · 记得你的中文伴学助手':'Hanzi — Your Chinese, remembered.';
+ const selector=document.getElementById('interface-language');if(selector)selector.value=currentLanguage;
+ document.title=currentLanguage==='zh'?'Hanzi 汉知 · 记得你的中文伴学助手':`Hanzi — ${translateText('Your Chinese, remembered.')}`;
 }
 export function observeTranslations(){
  let pending=false;
