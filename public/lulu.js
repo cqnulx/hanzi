@@ -39,7 +39,7 @@ const MUSIC_COPY={
  ko:{musicPlay:'음악 재생',musicPause:'음악 일시 정지',musicLoading:'음악을 불러오고 있어요…',musicError:'아직 이 노래를 재생할 수 없어요. 나중에 다시 시도해 주세요.',song:'반딧불이 노래'},
 };
 for(const code of Object.keys(COPY))Object.assign(COPY[code],MUSIC_COPY[code]);
-const MUSIC_SOURCE='./lulu-firefly-song.m4a?v=music-2';
+const MUSIC_SOURCE='./lulu-firefly-song.mp3?v=music-3';
 const DRAG_HINT={zh:'拖动师小噜调整位置，单击打开对话',en:'Drag Shi Xiaolu to move; click to chat',es:'Arrastra a Shi Xiaolu para moverlo; haz clic para conversar',fr:'Déplacez Shi Xiaolu en le faisant glisser ; cliquez pour discuter',de:'Shi Xiaolu zum Verschieben ziehen; zum Chatten anklicken',ja:'師小ルーをドラッグして移動、クリックして会話',ko:'스샤오루를 끌어서 이동하고 클릭해서 대화해 보세요'};
 const POSITION_KEY='hanzi-shixiaolu-position';
 export const normalizeGuideSection=value=>SECTIONS.includes(value)?value:'overview';

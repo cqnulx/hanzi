@@ -68,9 +68,19 @@ export async function saveState(state){
   await fs.writeFile(temporary,JSON.stringify(state,null,2)+'\n','utf8');await fs.rename(temporary,stateFile);
 }
 
-export async function healthy(address){
-  try{const response=await fetch(address+'/api/health',{signal:AbortSignal.timeout(5000)});return response.ok&&(await response.json()).ok===true;}
+async function systemTunnelHealth(address){
+  if(process.platform!=='win32'||!tunnelPattern.test(address))return false;
+  const powershell=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  const command=`try{$r=Invoke-RestMethod -Uri '${address}/api/health' -TimeoutSec 8;if($r.ok -eq $true){'ok'}}catch{}`;
+  try{const {stdout}=await runFile(powershell,['-NoProfile','-Command',command],{windowsHide:true,encoding:'utf8',timeout:10000});return stdout.trim()==='ok';}
   catch{return false;}
+}
+
+export async function healthy(address,{fetchImpl=globalThis.fetch,systemProbe=systemTunnelHealth}={}){
+  try{const response=await fetchImpl(address+'/api/health',{signal:AbortSignal.timeout(5000)});if(response.ok&&(await response.json()).ok===true)return true;}
+  catch{}
+  if(!tunnelPattern.test(address))return false;
+  try{return await systemProbe(address)===true;}catch{return false;}
 }
 
 export async function voiceHealth(fetchImpl=globalThis.fetch){

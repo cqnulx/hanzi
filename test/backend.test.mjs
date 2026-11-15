@@ -48,11 +48,15 @@ const answersFor=set=>set.questions.map((q,i)=>({questionId:q.id,answer:i===0?1:
 test('local music serves the audio MIME type and exact byte ranges without model calls',async()=>{
  const f=await fixture(),bytes=Buffer.from('0123456789abcdef');
  try{
-  await fs.writeFile(path.join(f.directory,'public','song.m4a'),bytes);
-  const full=await fetch(f.base+'/song.m4a');assert.equal(full.status,200);assert.equal(full.headers.get('content-type'),'audio/mp4');assert.deepEqual(Buffer.from(await full.arrayBuffer()),bytes);
-  const part=await fetch(f.base+'/song.m4a',{headers:{Range:'bytes=4-7'}});assert.equal(part.status,206);assert.equal(part.headers.get('content-type'),'audio/mp4');assert.equal(part.headers.get('content-range'),'bytes 4-7/16');assert.equal(part.headers.get('accept-ranges'),'bytes');assert.equal(await part.text(),'4567');
-  const head=await fetch(f.base+'/song.m4a',{method:'HEAD',headers:{Range:'bytes=4-7'}});assert.equal(head.status,206);assert.equal(head.headers.get('content-length'),'4');assert.equal((await head.arrayBuffer()).byteLength,0);
-  assert.equal((await fetch(f.base+'/song.m4a',{headers:{Range:'bytes=20-30'}})).status,416);assert.equal(f.calls.length,0);
+  for(const [extension,mime]of [['m4a','audio/mp4'],['mp3','audio/mpeg']]){
+   await fs.writeFile(path.join(f.directory,'public','song.'+extension),bytes);
+   const url=f.base+'/song.'+extension;
+   const full=await fetch(url);assert.equal(full.status,200);assert.equal(full.headers.get('content-type'),mime);assert.deepEqual(Buffer.from(await full.arrayBuffer()),bytes);
+   const part=await fetch(url,{headers:{Range:'bytes=4-7'}});assert.equal(part.status,206);assert.equal(part.headers.get('content-type'),mime);assert.equal(part.headers.get('content-range'),'bytes 4-7/16');assert.equal(part.headers.get('accept-ranges'),'bytes');assert.equal(await part.text(),'4567');
+   const head=await fetch(url,{method:'HEAD',headers:{Range:'bytes=4-7'}});assert.equal(head.status,206);assert.equal(head.headers.get('content-length'),'4');assert.equal((await head.arrayBuffer()).byteLength,0);
+   assert.equal((await fetch(url,{headers:{Range:'bytes=20-30'}})).status,416);
+  }
+  assert.equal(f.calls.length,0);
  }finally{await f.close();}
 });
 

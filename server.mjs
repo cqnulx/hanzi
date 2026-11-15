@@ -15,7 +15,7 @@ import { createLuluIntroCatalog, luluIntroRequest } from './lulu-intros.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 32768;
-const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg', '.webp':'image/webp', '.mp4':'video/mp4', '.m4a':'audio/mp4', '.vtt':'text/vtt; charset=utf-8', '.ico':'image/x-icon' };
+const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg', '.webp':'image/webp', '.mp4':'video/mp4', '.m4a':'audio/mp4', '.mp3':'audio/mpeg', '.vtt':'text/vtt; charset=utf-8', '.ico':'image/x-icon' };
 const CATEGORIES = new Set(['goal','preference','grammar','vocabulary','culture','progress','general']);
 const TRANSCRIPT_METRICS={
   en:'Transcript match only. This does not measure pronunciation, tones, or accent.',
@@ -510,7 +510,7 @@ export function createServer(options={}) {
       const real=await fs.realpath(target),publicReal=await fs.realpath(publicDir);if(!real.startsWith(publicReal+path.sep))throw fail(404,'File not found.');
       res.setHeader('Cache-Control','no-cache');
       const content=await fs.readFile(real),range=req.headers.range;
-      if(range&&['.mp4','.m4a'].includes(path.extname(target))){
+      if(range&&['.mp4','.m4a','.mp3'].includes(path.extname(target))){
         const match=/^bytes=(\d+)-(\d*)$/.exec(range);if(!match)throw fail(416,'Unsupported byte range.');
         const start=Number(match[1]),end=match[2]?Math.min(Number(match[2]),stat.size-1):stat.size-1;if(start>end||start>=stat.size)throw fail(416,'Range is outside this media.');
         res.writeHead(206,{'Content-Type':MIME[path.extname(target)],'Content-Range':`bytes ${start}-${end}/${stat.size}`,'Accept-Ranges':'bytes','Content-Length':end-start+1});return res.end(req.method==='HEAD'?undefined:content.subarray(start,end+1));

@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ensureVoiceHelper,isOwnedProcess,voiceHealth,registerVoiceWorker} from '../computer-runtime.mjs';
+import {ensureVoiceHelper,isOwnedProcess,voiceHealth,registerVoiceWorker,healthy} from '../computer-runtime.mjs';
 
 const identity={id:1234,executable:'C:\\voice\\python.exe',startedAt:'2026-11-15T12:00:00.0000000Z'};
+
+test('tunnel startup can use the system proxy when direct networking fails, limited to trusted tunnel addresses',async()=>{
+ const address='https://restored.trycloudflare.com';let probes=0;
+ const options={fetchImpl:async()=>{throw Error('direct connection unavailable');},systemProbe:async url=>{assert.equal(url,address);probes++;return true;}};
+ assert.equal(await healthy(address,options),true);assert.equal(probes,1);
+ assert.equal(await healthy('http://127.0.0.1:4173',options),false);assert.equal(await healthy("https://untrusted.example/'",options),false);assert.equal(probes,1);
+ assert.equal(await healthy(address,{...options,fetchImpl:async()=>Response.json({ok:true})}),true);assert.equal(probes,1);
+ assert.equal(await healthy(address,{...options,systemProbe:async()=>false}),false);
+});
 
 test('recorded voice identity is stoppable only while its exact executable and process start match',async()=>{
  const record={label:'voice',...identity};
