@@ -19,7 +19,16 @@ const VOICE_COPY={
  ja:{voiceNote:'参考音声の声質 · 合成音声',deviceVoiceNote:'アニメ風の音色 · 端末の音声',voiceLoading:'師小ルーの音声を準備しています…',voiceUnavailable:'師小ルーの音声サービスが利用できません。再試行するか、端末のアニメ風音声を選んでください。',voiceBlocked:'音声の準備ができました。「もう一度聞く」を押してください。',deviceVoice:'端末のアニメ風音声を使う'},
  ko:{voiceNote:'참고 음색 · 합성 음성',deviceVoiceNote:'만화 캐릭터 음색 · 기기 음성',voiceLoading:'스샤오루의 목소리를 준비하고 있어요…',voiceUnavailable:'스샤오루의 음성 서비스를 사용할 수 없어요. 다시 시도하거나 기기의 만화 음색을 선택해 주세요.',voiceBlocked:'음성이 준비되었어요. ‘다시 듣기’를 눌러 주세요.',deviceVoice:'기기의 만화 음색 사용'},
 };
-for(const code of Object.keys(COPY))Object.assign(COPY[code],VOICE_COPY[code]);
+const VOICE_PROGRESS={
+ zh:{voiceFirst:'正在准备声音',voiceNext:'正在准备下一段',voiceReading:'正在朗读'},
+ en:{voiceFirst:'Preparing the voice',voiceNext:'Preparing the next part',voiceReading:'Reading aloud'},
+ es:{voiceFirst:'Preparando la voz',voiceNext:'Preparando la siguiente parte',voiceReading:'Leyendo en voz alta'},
+ fr:{voiceFirst:'Préparation de la voix',voiceNext:'Préparation de la partie suivante',voiceReading:'Lecture en cours'},
+ de:{voiceFirst:'Stimme wird vorbereitet',voiceNext:'Nächster Abschnitt wird vorbereitet',voiceReading:'Wird vorgelesen'},
+ ja:{voiceFirst:'音声を準備しています',voiceNext:'次の部分の音声を準備しています',voiceReading:'読み上げ中'},
+ ko:{voiceFirst:'음성을 준비하고 있어요',voiceNext:'다음 부분의 음성을 준비하고 있어요',voiceReading:'읽어 주고 있어요'},
+};
+for(const code of Object.keys(COPY))Object.assign(COPY[code],VOICE_COPY[code],VOICE_PROGRESS[code]);
 const DRAG_HINT={zh:'拖动师小噜调整位置，单击打开对话',en:'Drag Shi Xiaolu to move; click to chat',es:'Arrastra a Shi Xiaolu para moverlo; haz clic para conversar',fr:'Déplacez Shi Xiaolu en le faisant glisser ; cliquez pour discuter',de:'Shi Xiaolu zum Verschieben ziehen; zum Chatten anklicken',ja:'師小ルーをドラッグして移動、クリックして会話',ko:'스샤오루를 끌어서 이동하고 클릭해서 대화해 보세요'};
 const POSITION_KEY='hanzi-shixiaolu-position';
 export const normalizeGuideSection=value=>SECTIONS.includes(value)?value:'overview';
@@ -78,11 +87,20 @@ export function createLuluVoicePlayback({requestVoice,onState=()=>{},createAudio
   }
   async function start(index){
    if(!active())return false;
-   onState('loading');
+   const progress={segmentIndex:index,segmentCount:entry.count};
+   entry.blockedIndex=index;
+   onState('loading',progress);
    try{
     const result=await segment(index);if(!active())return false;
     source=createUrl(result.audio);const clip=createAudio();current=clip;clip.src=source;
-    clip.onplay=()=>{if(active()&&current===clip)onState('playing');};
+    clip.onplay=()=>{
+     if(!active()||current!==clip)return;
+     entry.blockedIndex=null;
+     onState('playing',progress);
+     // Some media hosts settle play() only after playback. Prefetch on the
+     // playback event so the next request always overlaps the current clip.
+     if(index+1<entry.count)void segment(index+1).catch(()=>{});
+    };
     clip.onended=()=>{
      if(!active()||current!==clip)return;
      clear();
@@ -93,9 +111,6 @@ export function createLuluVoicePlayback({requestVoice,onState=()=>{},createAudio
     try{await clip.play();}
     catch(error){if(!active())return false;entry.blockedIndex=index;clear();onState(error?.name==='NotAllowedError'?'blocked':'unavailable');return false;}
     if(!active())return false;
-    entry.blockedIndex=null;
-    // Exactly one segment is prepared ahead; old sessions never schedule another request.
-    if(index+1<entry.count)void segment(index+1).catch(()=>{});
     return true;
    }catch{if(active()){entry.blockedIndex=index;clear();onState('unavailable');}return false;}
   }
@@ -154,9 +169,10 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
   if(launcher.hasPointerCapture?.(ended.pointerId))launcher.releasePointerCapture(ended.pointerId);
   if(ended.moved){suppressClick=true;const box=launcher.getBoundingClientRect();applyPosition({x:box.left,y:box.top},{save:true});if(event.cancelable)event.preventDefault();}
  }
- const referenceVoice=createLuluVoicePlayback({requestVoice,onState:status=>{
+ const referenceVoice=createLuluVoicePlayback({requestVoice,onState:(status,{segmentIndex,segmentCount}={})=>{
   root.classList.toggle('is-speaking',status==='playing');deviceVoiceButton.hidden=status!=='unavailable';
-  find('.lulu-audio-status').textContent=({loading:copy().voiceLoading,unavailable:copy().voiceUnavailable,blocked:copy().voiceBlocked})[status]||'';
+  const c=copy(),progress=Number.isInteger(segmentIndex)&&Number.isInteger(segmentCount)&&segmentIndex>=0&&segmentCount>segmentIndex?` (${segmentIndex+1}/${segmentCount})`:'';
+  find('.lulu-audio-status').textContent=({loading:(segmentIndex>0?c.voiceNext:c.voiceFirst)+progress,playing:c.voiceReading+progress,unavailable:c.voiceUnavailable,blocked:c.voiceBlocked})[status]||'';
  }});
  function stopAudio(){speechGeneration++;referenceVoice.stop();if(utterance&&window.speechSynthesis)window.speechSynthesis.cancel();utterance=null;root.classList.remove('is-speaking');}
  function stopMicrophone(){if(recognition){const current=recognition;recognition=null;current.abort();}find('.lulu-input-status').textContent='';find('.lulu-mic').classList.remove('is-listening');}

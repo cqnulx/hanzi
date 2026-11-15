@@ -133,6 +133,27 @@ test('stopping during prefetch never starts an old segment or schedules the foll
  await playback.play(progressiveText,'zh');await flush();assert.deepEqual(calls,[0,1]);assert.equal(clips.length,2);playback.dispose();
 });
 
+test('prefetch starts on playback even when the media play promise stays pending until the clip ends',async()=>{
+ const count=splitLuluSpeech(progressiveText,'zh').length,calls=[],clips=[],playSettled=[],events=[];
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload.segmentIndex);return segmentVoice(payload.segmentIndex,count);},onState:(state,progress)=>events.push({state,progress}),createAudio:()=>{const waiting=deferred();playSettled.push(waiting);const clip=audioDouble({play:()=>waiting.promise});clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:()=>{}});
+ const first=playback.play(progressiveText,'zh');await flush();
+ assert.equal(clips.length,1);assert.deepEqual(calls,[0,1],'the second request begins while the opening play promise is still pending');
+ assert.deepEqual(events.at(-1),{state:'playing',progress:{segmentIndex:0,segmentCount:count}});
+ const second=clips[0].onended();playSettled[0].resolve();await first;await flush();
+ assert.equal(clips.length,2);assert.deepEqual(calls,[0,1,2],'each playing clip prepares only its immediate successor');
+ assert.deepEqual(events.at(-1),{state:'playing',progress:{segmentIndex:1,segmentCount:count}});
+ const stalePlay=clips[1].onplay;playback.stop();stalePlay();playSettled[1].resolve();await second;
+ assert.equal(events.at(-1).state,'idle');assert.deepEqual(calls,[0,1,2]);playback.dispose();
+});
+
+test('replaying while the next segment is preparing resumes it instead of repeating the opening',async()=>{
+ const count=splitLuluSpeech(progressiveText,'zh').length,waiting=deferred(),calls=[],clips=[];
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload.segmentIndex);return payload.segmentIndex===1?waiting.promise:segmentVoice(payload.segmentIndex,count);},createAudio:()=>{const clip=audioDouble();clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:()=>{}});
+ await playback.play(progressiveText,'zh');const advancing=clips[0].onended();const resumed=playback.play(progressiveText,'zh');
+ waiting.resolve(segmentVoice(1,count));assert.equal(await advancing,false);assert.equal(await resumed,true);await flush();
+ assert.equal(clips.length,2);assert.deepEqual(calls,[0,1,2],'the opening is neither requested nor played again');playback.dispose();
+});
+
 test('autoplay blocking between segments resumes that cached segment without repeating the opening',async()=>{
  const count=splitLuluSpeech(progressiveText,'zh').length,calls=[],clips=[],states=[];
  const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload.segmentIndex);return segmentVoice(payload.segmentIndex,count);},onState:state=>states.push(state),createAudio:()=>{const clip=audioDouble();if(clips.length===1)clip.play=async()=>{throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});};clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:()=>{}});
