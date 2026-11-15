@@ -26,7 +26,10 @@ jobs:
       - name: Validate application
         run: node --test test/*.test.mjs
       - name: Validate local voice HTTP boundaries
-        run: python3 -B test/lulu-voice-service.test.py
+        run: |
+          python3 -B test/lulu-voice-service.test.py
+          python3 -B test/lulu-voice-cache.test.py
+          python3 -B test/lulu-voice-acceleration.test.py
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:

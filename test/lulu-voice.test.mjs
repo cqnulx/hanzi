@@ -32,6 +32,16 @@ test('voice failures preserve readable replies and never return fake speech or p
  }
 });
 
+test('only a trusted standard introduction history entry permits persistent voice caching',async()=>{
+ const calls=[],voice=createLuluVoice({fetchImpl:async(_url,options)=>{calls.push(JSON.parse(options.body));return recording();}});
+ const intro={role:'assistant',content:reply,language:'zh',mode:'intro'};
+ await voice({text:reply,language:'zh',cache:'standard-intro'},[{...intro,mode:'chat'}]);
+ assert.equal(calls.at(-1).cache,undefined,'the browser cannot turn a chat reply into a disk-cached introduction');
+ await voice({text:reply,language:'zh'},[intro]);assert.equal(calls.at(-1).cache,'standard-intro');
+ await voice({text:reply,language:'zh'},[intro,{...intro,mode:'chat'}]);
+ assert.equal(calls.at(-1).cache,undefined,'the latest matching reply determines the trusted mode');
+});
+
 test('progressive speech sends only validated session reply segments and rejects arbitrary segment requests',async()=>{
  const full='你好，我是师小噜。这里可以查看你的学习进度和每日练习时间，还可以打开课程、写作和学习计划。我们可以先选一个小目标，一步一步练习中文。';
  const segments=splitLuluSpeech(full,'zh'),calls=[];

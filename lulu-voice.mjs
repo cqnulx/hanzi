@@ -10,11 +10,12 @@ export function createLuluVoice({origin='http://127.0.0.1:4187',fetchImpl=global
  return async function synthesize(input,history=[]){
   if(typeof input.text!=='string'||!input.text.trim()||input.text.length>6000||!LANGUAGES.has(input.language))throw fail(400,'Choose an available Lulu reply and language.');
   const text=input.text.trim(),language=input.language;
-  if(!history.some(item=>item.role==='assistant'&&item.content===text&&item.language===language))throw fail(400,'Only a Lulu reply from this learning session can be read aloud.');
+  const reply=[...history].reverse().find(item=>item.role==='assistant'&&item.content===text&&item.language===language);
+  if(!reply)throw fail(400,'Only a Lulu reply from this learning session can be read aloud.');
   const segmented=input.segmentIndex!==undefined,segments=segmented?splitLuluSpeech(text,language):[text],segmentIndex=segmented?input.segmentIndex:0;
   if(!Number.isInteger(segmentIndex)||segmentIndex<0||segmentIndex>=segments.length)throw fail(400,'Choose an available speech segment.');
   let response;
-  try{response=await fetchImpl(new URL('/synthesize',address),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:segments[segmentIndex],language}),redirect:'error',signal:AbortSignal.timeout(timeoutMs)});}
+  try{response=await fetchImpl(new URL('/synthesize',address),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:segments[segmentIndex],language,...(reply.mode==='intro'?{cache:'standard-intro'}:{})}),redirect:'error',signal:AbortSignal.timeout(timeoutMs)});}
   catch{throw fail(503,'Lulu voice is temporarily unavailable. You can still read the reply.');}
   if(!response.ok)throw fail(503,'Lulu voice is still preparing or temporarily unavailable. You can still read the reply.');
   if(!/^audio\/(?:wav|x-wav)(?:;|$)/i.test(response.headers.get('content-type')||'')||Number(response.headers.get('content-length'))>MAX_AUDIO_BYTES)throw fail(502,'The voice service returned an invalid recording.');

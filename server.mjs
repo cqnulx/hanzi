@@ -11,6 +11,7 @@ import { difficultyRevision, teachingLevel, performanceEvidence, validateDifficu
 import { localizeLearningHints } from './hint-localization.mjs';
 import { LULU_SECTIONS, LULU_SYSTEM, luluActions } from './lulu-guide.mjs';
 import { createLuluVoice } from './lulu-voice.mjs';
+import { createLuluIntroCatalog, luluIntroRequest } from './lulu-intros.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 32768;
@@ -150,6 +151,7 @@ export function createServer(options={}) {
   const lessons=options.lessons||curriculum;
   const fetchImpl=options.fetchImpl||globalThis.fetch;
   const luluVoice=createLuluVoice({origin:options.voiceOrigin||process.env.LULU_VOICE_ORIGIN||'http://127.0.0.1:4187',fetchImpl:options.voiceFetchImpl||globalThis.fetch,timeoutMs:options.voiceTimeoutMs});
+  const luluIntros=createLuluIntroCatalog({directory:options.luluIntroDirectory||path.join(storageDir,'lulu-intros'),model});
   const monitor=createRequestMonitor({directory:path.join(storageDir,'request-logs'),secrets:[apiKey]});
   const sessionQueues=new Map();
   async function save(id,state) { const target=path.join(storageDir,`${id}.json`), temporary=`${target}.${randomBytes(6).toString('hex')}.tmp`;await fs.writeFile(temporary,JSON.stringify(state,null,2),{mode:0o600});await fs.rename(temporary,target); }
@@ -405,12 +407,19 @@ export function createServer(options={}) {
           if(!['intro','chat'].includes(input.mode)||!Object.hasOwn(LULU_SECTIONS,input.section))throw fail(400,'Choose an available lesson.');
           const section=input.section,language=normalizeLanguage(input.language),message=input.mode==='chat'?required(input.message,'Message',5000):text(input.message,1000);
           const history=Array.isArray(state._private?.luluHistory)?state._private.luluHistory.slice(-24):[];
-          const result=await ask(LULU_SYSTEM,{task:'lulu',mode:input.mode,section,message,featureFacts:LULU_SECTIONS,sectionFacts:LULU_SECTIONS[section],capabilities:{supportLanguages:['zh','en','es','fr','de','ja','ko'],navigationViews:Object.keys(LULU_SECTIONS),character:'Shi Xiaolu (师小噜)',originalCharacterVoiceAvailable:false},profile:state.profile,learningDifficulty:state.learningDifficulty||null,recentAccuracy:(state.quizPerformance||[]).slice(-8),memories:relevantMemories(state,message||LULU_SECTIONS[section].name),history},language,1800);
+          let result,introCached=false;
+          if(input.mode==='intro'){
+            if(!apiKey)throw fail(503,'The learning service is not configured. Please contact the site administrator.');
+            const introduction=await luluIntros.resolve(section,language,()=>ask(LULU_SYSTEM,luluIntroRequest(section,language),language,1800));
+            result=introduction.result;introCached=introduction.cached;
+          }else{
+            result=await ask(LULU_SYSTEM,{task:'lulu',mode:input.mode,section,message,featureFacts:LULU_SECTIONS,sectionFacts:LULU_SECTIONS[section],capabilities:{supportLanguages:['zh','en','es','fr','de','ja','ko'],navigationViews:Object.keys(LULU_SECTIONS),character:'Shi Xiaolu (师小噜)',originalCharacterVoiceAvailable:false},profile:state.profile,learningDifficulty:state.learningDifficulty||null,recentAccuracy:(state.quizPerformance||[]).slice(-8),memories:relevantMemories(state,message||LULU_SECTIONS[section].name),history},language,1800);
+          }
           const reply=text(result.reply,6000);if(!reply)throw fail(502,'The learning companion could not prepare a response. Please try again.');
           const actions=luluActions(result.actions),timestamp=new Date().toISOString();
           state._private=state._private||{};
-          state._private.luluHistory=[...history,{role:'user',content:message||`Introduce ${LULU_SECTIONS[section].name}`,section,language,mode:input.mode,timestamp},{role:'assistant',content:reply,section,language,timestamp}].slice(-24);
-          await save(id,state);return send(200,{reply,section,actions,model,mode:'live',state});
+          state._private.luluHistory=[...history,{role:'user',content:message||`Introduce ${LULU_SECTIONS[section].name}`,section,language,mode:input.mode,timestamp},{role:'assistant',content:reply,section,language,mode:input.mode,timestamp}].slice(-24);
+          await save(id,state);return send(200,{reply,section,actions,model,mode:'live',...(input.mode==='intro'?{introCached}:{}),state});
         }
         if(route==='/api/chat'&&req.method==='POST'){
           const message=required(input.message,'Message',5000);

@@ -9,6 +9,7 @@ import threading
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from lulu_voice_cache import PersistentWavCache, pipeline_identity
 
 LANGUAGES = {"zh": "Chinese", "en": "English", "es": "Spanish", "fr": "French", "de": "German", "ja": "Japanese", "ko": "Korean"}
 
@@ -28,17 +29,22 @@ class VoiceEngine:
         self.runtime, self.status, self.error = runtime, "loading", None
         self.pitch_semitones = pitch_semitones
         self.lock = threading.Lock()
+        self.cache_lock = threading.RLock()
         self.model = self.prompt = None
         self.cache = OrderedDict()
         self.cache_bytes = 0
         self.cache_max_items = 12
         self.cache_max_bytes = 20 * 1024 * 1024
+        self.disk_cache = None
+        self.acceleration = "loading"
+        self.cache_hits = {"memory": 0, "disk": 0, "generated": 0}
 
     def load(self):
         try:
             import soundfile as sf
             import torch
             from qwen_tts import Qwen3TTSModel
+            from lulu_voice_acceleration import install_predictor
             # Small autoregressive GPU steps lose time to excessive CPU workers.
             torch.set_num_threads(4)
             torch.set_num_interop_threads(1)
@@ -52,32 +58,77 @@ class VoiceEngine:
             transcript_path = self.runtime / "reference.txt"
             transcript = transcript_path.read_text(encoding="utf-8").strip() if transcript_path.exists() else ""
             self.prompt = self.model.create_voice_clone_prompt(ref_audio=(samples, rate), ref_text=transcript or None, x_vector_only_mode=not bool(transcript))
+            with torch.inference_mode():
+                accelerator = install_predictor(self.model)
+            self.acceleration = accelerator.backend
+            identity = pipeline_identity(self.runtime, self.pitch_semitones)
+            self.disk_cache = PersistentWavCache(self.runtime / "cache", identity)
             # Compile the audio transform and initialize GPU kernels before ready.
             import numpy as np
             adjust_voice_pitch(np.zeros(24000, dtype=np.float32), 24000, self.pitch_semitones)
             with torch.inference_mode():
                 self.model.generate_voice_clone(text="你好。", language="Chinese", voice_clone_prompt=self.prompt, max_new_tokens=256)
             self.status = "ready"
-            print("Shi Xiaolu reference voice ready", flush=True)
+            print(f"Shi Xiaolu reference voice ready ({self.acceleration})", flush=True)
         except Exception as exc:
             self.status, self.error = "error", f"{type(exc).__name__}: {exc}"
             print(f"Shi Xiaolu voice loading failed: {self.error}", flush=True)
 
-    def synthesize(self, text, language):
+    def synthesize(self, text, language, persistent=False):
         key = (language, text, self.pitch_semitones)
-        # Serial GPU access also coalesces simultaneous identical requests.
+        # Cached introductions stay responsive while another learner uses the GPU.
+        with self.cache_lock:
+            body = self._cached(key, text, language, persistent)
+            if body is not None:
+                return body
+        # Serial GPU access coalesces simultaneous misses after a second lookup.
         with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-                return self.cache[key]
+            with self.cache_lock:
+                body = self._cached(key, text, language, persistent)
+                if body is not None:
+                    return body
             body = self._generate(text, language)
-            if len(body) <= self.cache_max_bytes:
-                self.cache[key] = body
-                self.cache_bytes += len(body)
-                while len(self.cache) > self.cache_max_items or self.cache_bytes > self.cache_max_bytes:
-                    _, expired = self.cache.popitem(last=False)
-                    self.cache_bytes -= len(expired)
+            with self.cache_lock:
+                self.cache_hits["generated"] += 1
+                if persistent and self.disk_cache is not None:
+                    try:
+                        self.disk_cache.put(language, text, body)
+                    except OSError:
+                        # A full/unavailable disk must not discard generated speech.
+                        pass
+                self._remember(key, body)
             return body
+
+    def _cached(self, key, text, language, persistent):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            self.cache_hits["memory"] += 1
+            body = self.cache[key]
+            if persistent and self.disk_cache is not None:
+                try:
+                    self.disk_cache.put(language, text, body)
+                except OSError:
+                    pass
+            return body
+        if persistent and self.disk_cache is not None:
+            body = self.disk_cache.get(language, text)
+            if body is not None:
+                self.cache_hits["disk"] += 1
+                self._remember(key, body)
+                return body
+        return None
+
+    def cache_stats(self):
+        with self.cache_lock:
+            return {"memoryEntries": len(self.cache), "hits": dict(self.cache_hits), "disk": self.disk_cache.stats() if self.disk_cache is not None else None}
+
+    def _remember(self, key, body):
+        if len(body) <= self.cache_max_bytes:
+            self.cache[key] = body
+            self.cache_bytes += len(body)
+            while len(self.cache) > self.cache_max_items or self.cache_bytes > self.cache_max_bytes:
+                _, expired = self.cache.popitem(last=False)
+                self.cache_bytes -= len(expired)
 
     def _generate(self, text, language):
         import numpy as np
@@ -136,7 +187,7 @@ def create_handler(engine):
                 return
             if self.path != "/health":
                 return self.send_json(404, {"error": "Not found"})
-            self.send_json(200, {"status": engine.status, "voice": "reference", "languages": list(LANGUAGES), "referenceConfigured": (engine.runtime / "reference.wav").is_file(), "detail": engine.error, "pitchSemitones": engine.pitch_semitones, "pid": os.getpid(), "parentPid": os.getppid()})
+            self.send_json(200, {"status": engine.status, "voice": "reference", "languages": list(LANGUAGES), "referenceConfigured": (engine.runtime / "reference.wav").is_file(), "detail": engine.error, "pitchSemitones": engine.pitch_semitones, "acceleration": engine.acceleration, "cache": engine.cache_stats(), "pid": os.getpid(), "parentPid": os.getppid()})
         def do_POST(self):
             if not self.private_request():
                 return
@@ -156,7 +207,7 @@ def create_handler(engine):
                     return self.send_json(400, {"error": "Invalid text or language"})
                 if engine.status != "ready":
                     return self.send_json(503, {"error": "Voice service is not ready", "status": engine.status})
-                body = engine.synthesize(text, language)
+                body = engine.synthesize(text, language, persistent=data.get("cache") == "standard-intro")
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/wav")
                 self.send_header("Content-Length", str(len(body)))
