@@ -12,6 +12,19 @@ spec = importlib.util.spec_from_file_location("lulu_voice", Path(__file__).resol
 voice = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(voice)
 
+@unittest.skipUnless(importlib.util.find_spec('numpy') and importlib.util.find_spec('librosa'), 'Requires optional local voice audio dependencies')
+class VoicePitchTests(unittest.TestCase):
+    def test_lower_pitch_preserves_duration_and_avoids_clipping(self):
+        import numpy as np
+        rate = 24000
+        samples = (.8 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate)).astype(np.float32)
+        shifted = voice.adjust_voice_pitch(samples, rate, -2)
+        self.assertEqual(len(shifted), len(samples))
+        self.assertGreater(float(np.sqrt(np.mean(shifted**2))), .1)
+        self.assertLessEqual(float(np.max(np.abs(shifted))), .98001)
+        frequency = np.fft.rfftfreq(len(shifted), 1 / rate)[np.argmax(np.abs(np.fft.rfft(shifted)))]
+        self.assertAlmostEqual(frequency, 440 * 2**(-2/12), delta=2)
+
 class VoiceHTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

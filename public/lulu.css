@@ -1,6 +1,6 @@
 /* Lulu is separate from the learning workspace, preserving unfinished exercises. */
 .lulu-guide,.lulu-guide *{box-sizing:border-box;color:#000;-webkit-text-fill-color:#000;font-family:HanziStudyText,"Microsoft YaHei","SimSun",sans-serif}
-.lulu-guide{position:fixed;right:22px;bottom:18px;z-index:48;font-size:18px;line-height:1.65;--lulu-mouth-x:52.6%;--lulu-mouth-y:47.7%}
+.lulu-guide{position:fixed;right:22px;bottom:18px;z-index:48;font-size:18px;line-height:1.65;--lulu-mouth-x:52.6%;--lulu-mouth-y:51.86%}
 .lulu-guide button,.lulu-guide textarea,.lulu-guide select{font:inherit;line-height:1.5}
 .lulu-guide button{border:1px solid #cbd6bf;background:#fffef7;padding:8px 12px;border-radius:9px;min-height:40px;cursor:pointer;transition:background .15s}
 .lulu-guide button:hover:not(:disabled){background:#edf3e4}.lulu-guide button:disabled{opacity:.6;cursor:wait}
@@ -11,7 +11,7 @@
 .lulu-launcher-label{display:block;align-self:flex-end;padding:4px 12px;background:#fff7d7;border:1px solid #e5c36e;border-radius:16px;margin:0 0 10px -9px;font-weight:600;font-size:17px}
 .lulu-mouth{position:absolute;left:var(--lulu-mouth-x);top:var(--lulu-mouth-y);width:21%;height:3%;transform:translate(-50%,-50%);background:#5b2418;border-radius:48%;opacity:0;box-shadow:0 -1px 0 2px #ffae0a;pointer-events:none}
 .lulu-guide.is-speaking .lulu-mouth{opacity:1;animation:lulu-talk .24s ease-in-out infinite alternate}.lulu-guide.is-speaking .lulu-character{animation:lulu-chat-bob .75s ease-in-out infinite alternate}
-.lulu-panel{position:absolute;bottom:130px;right:0;width:440px;max-height:min(740px,calc(100dvh - 170px));display:flex;flex-direction:column;border:1px solid #d4c795;border-radius:18px;background:#fffef8;box-shadow:0 14px 50px #293d2930;overflow:hidden}
+.lulu-panel{position:absolute;bottom:170px;right:0;width:440px;max-height:min(740px,calc(100dvh - 210px));display:flex;flex-direction:column;border:1px solid #d4c795;border-radius:18px;background:#fffef8;box-shadow:0 14px 50px #293d2930;overflow:hidden}
 .lulu-panel::after{content:"";position:fixed;pointer-events:none}.lulu-panel[hidden]{display:none!important}
 .lulu-panel-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 14px;background:#fff1c8;border-bottom:1px solid #e8d9ac}
 .lulu-panel-header h2{font-size:24px;font-weight:600;line-height:1.45;letter-spacing:0;margin:0}
@@ -31,6 +31,6 @@
 @keyframes lulu-chat-bob{from{transform:translateY(0) rotate(-1deg)}to{transform:translateY(-5px) rotate(1deg)}}
 @keyframes lulu-talk{from{height:1.7%;width:17%}to{height:4%;width:21%}}
 @keyframes lulu-wait{0%,100%{background-position:0 50%}50%{background-position:100% 50%}}
-@media(max-height:700px){.lulu-panel{bottom:95px;max-height:calc(100dvh - 125px)}.lulu-character{width:68px}.lulu-launcher-label{font-size:16px}.lulu-panel-header{padding:12px 18px}.lulu-panel-body{padding:12px 18px}.lulu-reply{min-height:70px}}
-@media(max-width:760px){.lulu-guide{right:12px;bottom:12px}.lulu-panel{width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 140px)}.lulu-character{width:75px}}
+@media(max-height:700px){.lulu-panel{bottom:130px;max-height:calc(100dvh - 160px)}.lulu-character{width:68px}.lulu-launcher-label{font-size:16px}.lulu-panel-header{padding:12px 18px}.lulu-panel-body{padding:12px 18px}.lulu-reply{min-height:70px}}
+@media(max-width:760px){.lulu-guide{right:12px;bottom:12px}.lulu-panel{bottom:142px;width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 172px)}.lulu-character{width:75px}}
 @media(prefers-reduced-motion:reduce){.lulu-guide *{animation:none!important;transition:none!important}}

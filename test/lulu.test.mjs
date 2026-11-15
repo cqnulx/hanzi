@@ -33,7 +33,7 @@ test('every Lulu section introduction is model generated from trusted feature fa
    assert.deepEqual(result.data.actions,[{view:'learn',label:'Start a lesson'}]);assert.equal(result.data.state._private,undefined);
    const call=f.calls.at(-1);assert.equal(call.payload.task,'lulu');assert.deepEqual(call.payload.sectionFacts,LULU_SECTIONS[section]);assert.deepEqual(Object.keys(call.payload.featureFacts),Object.keys(LULU_SECTIONS));
    assert.equal(call.payload.capabilities.originalCharacterVoiceAvailable,false);
-   assert.match(call.body.messages[0].content,/Present yourself as Lulu/);assert.doesNotMatch(call.body.messages[0].content,/Present yourself as Hanzi/);
+   assert.match(call.body.messages[0].content,/Present yourself as Shi Xiaolu/);assert.doesNotMatch(call.body.messages[0].content,/Present yourself as Hanzi/);
    assert.match(call.body.messages[0].content,/not a human/);assert.match(call.body.messages[0].content,/original character/);
   }
   assert.equal(f.calls.length,6);assert.deepEqual((await f.read()).memories,[]);assert.deepEqual((await f.read()).mastery,{});

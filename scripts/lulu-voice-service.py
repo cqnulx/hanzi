@@ -11,9 +11,21 @@ from pathlib import Path
 
 LANGUAGES = {"zh": "Chinese", "en": "English", "es": "Spanish", "fr": "French", "de": "German", "ja": "Japanese", "ko": "Korean"}
 
+def adjust_voice_pitch(samples, rate, semitones=-2):
+    """Lower the reference timbre while keeping speech duration unchanged."""
+    import librosa
+    import numpy as np
+    shifted = librosa.effects.pitch_shift(np.asarray(samples, dtype=np.float32), sr=rate, n_steps=semitones) if semitones else np.asarray(samples, dtype=np.float32)
+    shifted = librosa.util.fix_length(shifted, size=len(samples))
+    peak = float(np.max(np.abs(shifted))) if len(shifted) else 0
+    if peak > .98:
+        shifted = shifted * (.98 / peak)
+    return shifted
+
 class VoiceEngine:
-    def __init__(self, runtime):
+    def __init__(self, runtime, pitch_semitones=-2):
         self.runtime, self.status, self.error = runtime, "loading", None
+        self.pitch_semitones = pitch_semitones
         self.lock = threading.Lock()
         self.model = self.prompt = None
 
@@ -33,10 +45,10 @@ class VoiceEngine:
             transcript = transcript_path.read_text(encoding="utf-8").strip() if transcript_path.exists() else ""
             self.prompt = self.model.create_voice_clone_prompt(ref_audio=(samples, rate), ref_text=transcript or None, x_vector_only_mode=not bool(transcript))
             self.status = "ready"
-            print("Lulu reference voice ready", flush=True)
+            print("Shi Xiaolu reference voice ready", flush=True)
         except Exception as exc:
             self.status, self.error = "error", f"{type(exc).__name__}: {exc}"
-            print(f"Lulu voice loading failed: {self.error}", flush=True)
+            print(f"Shi Xiaolu voice loading failed: {self.error}", flush=True)
 
     def synthesize(self, text, language):
         import numpy as np
@@ -64,7 +76,8 @@ class VoiceEngine:
                 waves, rate = self.model.generate_voice_clone(text=chunk, language=LANGUAGES[language], voice_clone_prompt=self.prompt, max_new_tokens=2048)
                 audio.append(waves[0])
             output = io.BytesIO()
-            sf.write(output, np.concatenate(audio), rate, format="WAV", subtype="PCM_16")
+            adjusted = adjust_voice_pitch(np.concatenate(audio), rate, self.pitch_semitones)
+            sf.write(output, adjusted, rate, format="WAV", subtype="PCM_16")
             return output.getvalue()
 
 def create_handler(engine):
@@ -94,7 +107,7 @@ def create_handler(engine):
                 return
             if self.path != "/health":
                 return self.send_json(404, {"error": "Not found"})
-            self.send_json(200, {"status": engine.status, "voice": "reference", "languages": list(LANGUAGES), "referenceConfigured": (engine.runtime / "reference.wav").is_file(), "detail": engine.error, "pid": os.getpid(), "parentPid": os.getppid()})
+            self.send_json(200, {"status": engine.status, "voice": "reference", "languages": list(LANGUAGES), "referenceConfigured": (engine.runtime / "reference.wav").is_file(), "detail": engine.error, "pitchSemitones": engine.pitch_semitones, "pid": os.getpid(), "parentPid": os.getppid()})
         def do_POST(self):
             if not self.private_request():
                 return
@@ -126,7 +139,7 @@ def create_handler(engine):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
-                print(f"Lulu synthesis failed: {type(exc).__name__}", flush=True)
+                print(f"Shi Xiaolu synthesis failed: {type(exc).__name__}", flush=True)
                 self.send_json(503, {"error": "Voice synthesis failed"})
     return Handler
 
@@ -134,11 +147,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=4187)
     parser.add_argument("--runtime", type=Path, default=Path(__file__).resolve().parents[1] / "runtime" / "lulu-voice")
+    parser.add_argument("--pitch-semitones", type=float, default=-2)
     args = parser.parse_args()
-    engine = VoiceEngine(args.runtime.resolve())
+    if not -12 <= args.pitch_semitones <= 12:
+        parser.error("--pitch-semitones must be between -12 and 12")
+    engine = VoiceEngine(args.runtime.resolve(), args.pitch_semitones)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), create_handler(engine))
     threading.Thread(target=engine.load, daemon=True).start()
-    print(f"Lulu voice listening on 127.0.0.1:{args.port}", flush=True)
+    print(f"Shi Xiaolu voice listening on 127.0.0.1:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
