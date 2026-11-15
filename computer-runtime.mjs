@@ -109,7 +109,7 @@ export async function ensureVoiceHelper(state,options={}){
     log('Lulu reference voice is starting in the background. Check runtime/voice.out.log for readiness.');
     return{status:'starting',reused:true};
   }
-  const directory=path.join(runtime,'lulu-voice'),python=path.join(directory,'venv','Scripts','python.exe'),script=path.join(root,'scripts','lulu-voice-service.py');
+  const directory=path.join(runtime,'lulu-voice'),guiPython=path.join(directory,'venv','Scripts','pythonw.exe'),python=await check(guiPython)?guiPython:path.join(directory,'venv','Scripts','python.exe'),script=path.join(root,'scripts','lulu-voice-service.py');
   for(const file of [python,script,path.join(directory,'model','model.safetensors'),path.join(directory,'reference.wav')]){
     if(!await check(file)){
       log('Lulu reference voice is not installed. The learning website remains available; complete the voice setup to enable it.');

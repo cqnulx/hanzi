@@ -46,13 +46,15 @@ test('loading or recorded starting voice service is reused without duplicate mod
  }
 });
 
-test('installed voice helper launches once in the background with private runtime paths, preserving the tunnel',async()=>{
- const state={processes:[],tunnelUrl:'https://keep.trycloudflare.com'},starts=[];
- const options={health:async()=>null,exists:async()=>true,isOwnedProcess:async()=>true,log:()=>{},startHelper:async(label,executable,args,received)=>{assert.equal(received,state);starts.push({label,executable,args});state.processes.push({label,...identity});}};
- assert.deepEqual(await ensureVoiceHelper(state,options),{status:'loading',started:true});
- assert.equal(starts.length,1);assert.equal(starts[0].label,'voice');assert.match(starts[0].executable,/runtime[\\/]lulu-voice[\\/]venv[\\/]Scripts[\\/]python\.exe$/);
- assert.match(starts[0].args[0],/scripts[\\/]lulu-voice-service\.py$/);assert.deepEqual(starts[0].args.slice(1,4),['--port','4187','--runtime']);
- assert.deepEqual(await ensureVoiceHelper(state,options),{status:'starting',reused:true});assert.equal(starts.length,1);assert.equal(state.tunnelUrl,'https://keep.trycloudflare.com');
+test('installed voice helper prefers the console-free launcher, falls back when absent, and launches once preserving the tunnel',async()=>{
+ for(const guiInstalled of [true,false]){
+  const state={processes:[],tunnelUrl:'https://keep.trycloudflare.com'},starts=[];
+  const options={health:async()=>null,exists:async file=>!file.endsWith('pythonw.exe')||guiInstalled,isOwnedProcess:async()=>true,log:()=>{},startHelper:async(label,executable,args,received)=>{assert.equal(received,state);starts.push({label,executable,args});state.processes.push({label,...identity});}};
+  assert.deepEqual(await ensureVoiceHelper(state,options),{status:'loading',started:true});
+  assert.equal(starts.length,1);assert.equal(starts[0].label,'voice');assert.match(starts[0].executable,/runtime[\\/]lulu-voice[\\/]venv[\\/]Scripts[\\/]pythonw?\.exe$/);assert.equal(starts[0].executable.endsWith('pythonw.exe'),guiInstalled);
+  assert.match(starts[0].args[0],/scripts[\\/]lulu-voice-service\.py$/);assert.deepEqual(starts[0].args.slice(1,4),['--port','4187','--runtime']);
+  assert.deepEqual(await ensureVoiceHelper(state,options),{status:'starting',reused:true});assert.equal(starts.length,1);assert.equal(state.tunnelUrl,'https://keep.trycloudflare.com');
+ }
 });
 
 test('a voice launch failure leaves normal website startup available',async()=>{
