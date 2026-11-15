@@ -18,12 +18,39 @@ class VoicePitchTests(unittest.TestCase):
         import numpy as np
         rate = 24000
         samples = (.8 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate)).astype(np.float32)
-        shifted = voice.adjust_voice_pitch(samples, rate, -2)
+        shifted = voice.adjust_voice_pitch(samples, rate)
         self.assertEqual(len(shifted), len(samples))
         self.assertGreater(float(np.sqrt(np.mean(shifted**2))), .1)
         self.assertLessEqual(float(np.max(np.abs(shifted))), .98001)
         frequency = np.fft.rfftfreq(len(shifted), 1 / rate)[np.argmax(np.abs(np.fft.rfft(shifted)))]
-        self.assertAlmostEqual(frequency, 440 * 2**(-2/12), delta=2)
+        self.assertAlmostEqual(frequency, 440 * 2**(-1/12), delta=2)
+
+class VoiceCacheTests(unittest.TestCase):
+    def test_duplicate_requests_share_generation_and_memory_is_bounded(self):
+        import time
+        engine = voice.VoiceEngine(Path("unused"))
+        engine.cache_max_items = 2
+        engine.cache_max_bytes = 6
+        calls = []
+        def generate(text, language):
+            calls.append((text, language))
+            time.sleep(.02)
+            return text.encode()
+        engine._generate = generate
+        outputs = []
+        threads = [threading.Thread(target=lambda: outputs.append(engine.synthesize("one", "en"))) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(outputs, [b"one", b"one"])
+        self.assertEqual(calls, [("one", "en")])
+        engine.synthesize("two", "en")
+        engine.synthesize("tri", "en")
+        self.assertLessEqual(len(engine.cache), 2)
+        self.assertLessEqual(engine.cache_bytes, 6)
+        engine.synthesize("one", "en")
+        self.assertEqual(calls.count(("one", "en")), 2)
 
 class VoiceHTTPTests(unittest.TestCase):
     @classmethod

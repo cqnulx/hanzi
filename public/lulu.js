@@ -1,3 +1,4 @@
+import {splitLuluSpeech} from './lulu-speech.js?v=voice-fast-1';
 const SECTIONS=['overview','learn','speak','write','path','memory'];
 const LOCALES={zh:'zh-CN',en:'en-US',es:'es-ES',fr:'fr-FR',de:'de-DE',ja:'ja-JP',ko:'ko-KR'};
 const COPY={
@@ -52,7 +53,7 @@ export function voiceForLanguage(voices,code){
  return matching.find(voice=>/xiaoxiao|xiaoyi|aria|jenny|samantha|susan|amelie|elvira|nanami|sunhi/i.test(voice.name||''))||matching.find(voice=>voice.default)||matching[0]||null;
 }
 
-/** Owns one audio clip and ignores synthesis that finishes after Stop or a page change. */
+/** Plays the opening sentence immediately, preparing only the next segment while it is heard. */
 export function createLuluVoicePlayback({requestVoice,onState=()=>{},createAudio=()=>new Audio(),createUrl=audio=>URL.createObjectURL(new Blob([Uint8Array.from(atob(audio.data),c=>c.charCodeAt(0))],{type:audio.mime})),revokeUrl=url=>URL.revokeObjectURL(url)}){
  let generation=0,current=null,source=null,cached=null,disposed=false;
  function clear(){if(current){const previous=current;current=null;previous.onplay=previous.onended=previous.onerror=null;previous.pause();previous.removeAttribute('src');previous.load();}if(source){revokeUrl(source);source=null;}}
@@ -60,18 +61,45 @@ export function createLuluVoicePlayback({requestVoice,onState=()=>{},createAudio
  async function play(text,language){
   stop();if(disposed)return false;
   const sequence=generation,key=language+'\n'+text;
-  onState('loading');
-  try{
-   const result=cached?.key===key?cached.result:await requestVoice({text,language});
-   if(disposed||sequence!==generation)return false;
-   if(result?.voice!=='reference'||result.language!==language||result.audio?.mime!=='audio/wav'||typeof result.audio.data!=='string'||!result.audio.data)throw Error('Invalid reference speech');
-   cached={key,result};source=createUrl(result.audio);const clip=createAudio();current=clip;clip.src=source;
-   clip.onplay=()=>{if(current===clip)onState('playing');};
-   clip.onended=()=>{if(current===clip){clear();onState('idle');}};
-   clip.onerror=()=>{if(current===clip){clear();onState('unavailable');}};
-   try{await clip.play();}catch(error){if(disposed||sequence!==generation)return false;clear();onState(error?.name==='NotAllowedError'?'blocked':'unavailable');return false;}
-   return !disposed&&sequence===generation;
-  }catch{if(!disposed&&sequence===generation){clear();onState('unavailable');}return false;}
+  if(cached?.key!==key)cached={key,count:Math.max(1,splitLuluSpeech(text,language).length),segments:new Map(),pending:new Map(),failures:new Map(),blockedIndex:null};
+  const entry=cached;entry.failures.clear();
+  const active=()=>!disposed&&sequence===generation;
+  async function segment(index){
+   if(entry.segments.has(index))return entry.segments.get(index);
+   if(entry.failures.has(index))throw entry.failures.get(index);
+   if(entry.pending.has(index))return entry.pending.get(index);
+   let response;try{response=requestVoice({text,language,segmentIndex:index});}catch(error){entry.failures.set(index,error);throw error;}
+   const pending=Promise.resolve(response).then(result=>{
+    if(result?.voice!=='reference'||result.language!==language||result.audio?.mime!=='audio/wav'||typeof result.audio.data!=='string'||!result.audio.data||(result.segmentIndex!==undefined&&result.segmentIndex!==index)||(result.segmentCount!==undefined&&result.segmentCount!==entry.count))throw Error('Invalid reference speech');
+    if(cached===entry)entry.segments.set(index,result);
+    return result;
+   }).catch(error=>{if(cached===entry)entry.failures.set(index,error);throw error;}).finally(()=>entry.pending.delete(index));
+   entry.pending.set(index,pending);return pending;
+  }
+  async function start(index){
+   if(!active())return false;
+   onState('loading');
+   try{
+    const result=await segment(index);if(!active())return false;
+    source=createUrl(result.audio);const clip=createAudio();current=clip;clip.src=source;
+    clip.onplay=()=>{if(active()&&current===clip)onState('playing');};
+    clip.onended=()=>{
+     if(!active()||current!==clip)return;
+     clear();
+     if(index+1<entry.count)return start(index+1);
+     entry.blockedIndex=null;onState('idle');
+    };
+    clip.onerror=()=>{if(active()&&current===clip){entry.blockedIndex=index;clear();onState('unavailable');}};
+    try{await clip.play();}
+    catch(error){if(!active())return false;entry.blockedIndex=index;clear();onState(error?.name==='NotAllowedError'?'blocked':'unavailable');return false;}
+    if(!active())return false;
+    entry.blockedIndex=null;
+    // Exactly one segment is prepared ahead; old sessions never schedule another request.
+    if(index+1<entry.count)void segment(index+1).catch(()=>{});
+    return true;
+   }catch{if(active()){entry.blockedIndex=index;clear();onState('unavailable');}return false;}
+  }
+  return start(entry.blockedIndex??0);
  }
  return{play,stop,reset(){stop();cached=null;},dispose(){disposed=true;stop();cached=null;}};
 }

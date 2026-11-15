@@ -6,6 +6,7 @@ import os from 'node:os';
 import {createLuluVoice} from '../lulu-voice.mjs';
 import {createServer} from '../server.mjs';
 import {createGateway} from '../gateway.mjs';
+import {splitLuluSpeech} from '../public/lulu-speech.js';
 
 const wav=Buffer.alloc(64);wav.write('RIFF');wav.write('WAVE',8);
 const reply='你好，我是噜噜。';
@@ -28,6 +29,24 @@ test('reference synthesis only accepts this session’s generated reply and a lo
 test('voice failures preserve readable replies and never return fake speech or provider diagnostics',async()=>{
  for(const fetchImpl of [async()=>{throw Error('private local path');},async()=>new Response('not ready',{status:503}),async()=>new Response('not audio'),async()=>new Response('not wav',{headers:{'Content-Type':'audio/wav'}}),async()=>new Response(null,{headers:{'Content-Type':'audio/wav','Content-Length':30*1024*1024}})]){
   await assert.rejects(createLuluVoice({fetchImpl})({text:reply,language:'zh'},history),error=>[502,503].includes(error.status)&&!error.message.includes('private local path'));
+ }
+});
+
+test('progressive speech sends only validated session reply segments and rejects arbitrary segment requests',async()=>{
+ const full='你好，我是师小噜。这里可以查看你的学习进度和每日练习时间，还可以打开课程、写作和学习计划。我们可以先选一个小目标，一步一步练习中文。';
+ const segments=splitLuluSpeech(full,'zh'),calls=[];
+ assert.ok(segments.length>1);assert.ok(segments[0].length<=32);assert.equal(segments.join(''),full);
+ const voice=createLuluVoice({fetchImpl:async(url,options)=>{calls.push(JSON.parse(options.body));return recording();}});
+ for(let index=0;index<segments.length;index++){
+  const result=await voice({text:full,language:'zh',segmentIndex:index},[{role:'assistant',content:full,language:'zh'}]);
+  assert.equal(result.segmentIndex,index);assert.equal(result.segmentCount,segments.length);assert.equal(calls.at(-1).text,segments[index]);
+ }
+ for(const index of [-1,.5,segments.length,'0',null])await assert.rejects(voice({text:full,language:'zh',segmentIndex:index},[{role:'assistant',content:full,language:'zh'}]),error=>error.status===400);
+ await assert.rejects(voice({text:segments[0],language:'zh',segmentIndex:0},[{role:'assistant',content:full,language:'zh'}]),error=>error.status===400);
+ assert.equal(calls.length,segments.length);
+ for(const language of ['en','es','fr','de','ja','ko']){
+  const text=language==='ja'?'こんにちは。中国語の練習を一緒に始めましょう。'.repeat(8):language==='ko'?'안녕하세요. 중국어 공부를 함께 시작해요. '.repeat(8):'Let us start with one short sentence. Then we can practise writing and look at your learning plan together. '.repeat(4);
+  const parts=splitLuluSpeech(text,language);assert.ok(parts.length>1);assert.equal(parts.join('').replace(/\s/g,''),text.replace(/\s/g,''));
  }
 });
 

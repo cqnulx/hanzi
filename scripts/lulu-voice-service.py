@@ -6,12 +6,13 @@ import json
 import os
 import re
 import threading
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 LANGUAGES = {"zh": "Chinese", "en": "English", "es": "Spanish", "fr": "French", "de": "German", "ja": "Japanese", "ko": "Korean"}
 
-def adjust_voice_pitch(samples, rate, semitones=-2):
+def adjust_voice_pitch(samples, rate, semitones=-1):
     """Lower the reference timbre while keeping speech duration unchanged."""
     import librosa
     import numpy as np
@@ -23,17 +24,24 @@ def adjust_voice_pitch(samples, rate, semitones=-2):
     return shifted
 
 class VoiceEngine:
-    def __init__(self, runtime, pitch_semitones=-2):
+    def __init__(self, runtime, pitch_semitones=-1):
         self.runtime, self.status, self.error = runtime, "loading", None
         self.pitch_semitones = pitch_semitones
         self.lock = threading.Lock()
         self.model = self.prompt = None
+        self.cache = OrderedDict()
+        self.cache_bytes = 0
+        self.cache_max_items = 12
+        self.cache_max_bytes = 20 * 1024 * 1024
 
     def load(self):
         try:
             import soundfile as sf
             import torch
             from qwen_tts import Qwen3TTSModel
+            # Small autoregressive GPU steps lose time to excessive CPU workers.
+            torch.set_num_threads(4)
+            torch.set_num_interop_threads(1)
             if not torch.cuda.is_available():
                 raise RuntimeError("CUDA GPU is unavailable")
             model_path, reference = self.runtime / "model", self.runtime / "reference.wav"
@@ -44,6 +52,11 @@ class VoiceEngine:
             transcript_path = self.runtime / "reference.txt"
             transcript = transcript_path.read_text(encoding="utf-8").strip() if transcript_path.exists() else ""
             self.prompt = self.model.create_voice_clone_prompt(ref_audio=(samples, rate), ref_text=transcript or None, x_vector_only_mode=not bool(transcript))
+            # Compile the audio transform and initialize GPU kernels before ready.
+            import numpy as np
+            adjust_voice_pitch(np.zeros(24000, dtype=np.float32), 24000, self.pitch_semitones)
+            with torch.inference_mode():
+                self.model.generate_voice_clone(text="你好。", language="Chinese", voice_clone_prompt=self.prompt, max_new_tokens=256)
             self.status = "ready"
             print("Shi Xiaolu reference voice ready", flush=True)
         except Exception as exc:
@@ -51,6 +64,22 @@ class VoiceEngine:
             print(f"Shi Xiaolu voice loading failed: {self.error}", flush=True)
 
     def synthesize(self, text, language):
+        key = (language, text, self.pitch_semitones)
+        # Serial GPU access also coalesces simultaneous identical requests.
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            body = self._generate(text, language)
+            if len(body) <= self.cache_max_bytes:
+                self.cache[key] = body
+                self.cache_bytes += len(body)
+                while len(self.cache) > self.cache_max_items or self.cache_bytes > self.cache_max_bytes:
+                    _, expired = self.cache.popitem(last=False)
+                    self.cache_bytes -= len(expired)
+            return body
+
+    def _generate(self, text, language):
         import numpy as np
         import soundfile as sf
         import torch
@@ -70,7 +99,7 @@ class VoiceEngine:
             current += part
         if current.strip():
             chunks.append(current)
-        with self.lock, torch.inference_mode():
+        with torch.inference_mode():
             audio = []
             for chunk in chunks:
                 waves, rate = self.model.generate_voice_clone(text=chunk, language=LANGUAGES[language], voice_clone_prompt=self.prompt, max_new_tokens=2048)
@@ -147,7 +176,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=4187)
     parser.add_argument("--runtime", type=Path, default=Path(__file__).resolve().parents[1] / "runtime" / "lulu-voice")
-    parser.add_argument("--pitch-semitones", type=float, default=-2)
+    parser.add_argument("--pitch-semitones", type=float, default=-1)
     args = parser.parse_args()
     if not -12 <= args.pitch_semitones <= 12:
         parser.error("--pitch-semitones must be between -12 and 12")

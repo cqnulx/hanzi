@@ -4,7 +4,7 @@ import { LANGUAGES, normalizeLanguage, languageInfo } from './languages.js';
 import { getSpeechSupport, speakChinese, stopSpeaking, startRecognition } from './speech.js';
 import { createLessonVideo } from './lesson-video.js';
 import { API_BASE_URL } from './deployment-config.js';
-import { initializeLulu } from './lulu.js?v=shixiaolu-drag-1';
+import { initializeLulu } from './lulu.js?v=voice-fast-1';
 let luluGuide=null;
 let lessons=getLocalizedLessons(getLanguage());
 

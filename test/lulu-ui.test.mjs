@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLuluConversation,createLuluVoicePlayback,normalizeGuideSection,voiceForLanguage,clampLuluPosition,luluAnchorPosition,luluPanelPlacement} from '../public/lulu.js';
+import {splitLuluSpeech} from '../public/lulu-speech.js';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 
@@ -77,7 +78,7 @@ test('reference playback ignores a completed synthesis after Stop and releases a
 
 test('blocked autoplay keeps one generated response for explicit replay without another synthesis request',async()=>{
  let calls=0;const clips=[],states=[],revoked=[];
- const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls++;assert.deepEqual(payload,{text:'Hello from Lulu',language:'en'});return generatedVoice('en');},onState:state=>states.push(state),createAudio:()=>{const clip=audioDouble({play:async()=>{if(!clips.length)throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});}});clips.push(clip);if(clips.length===1)clip.play=async()=>{throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});};return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:url=>revoked.push(url)});
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls++;assert.deepEqual(payload,{text:'Hello from Lulu',language:'en',segmentIndex:0});return generatedVoice('en');},onState:state=>states.push(state),createAudio:()=>{const clip=audioDouble({play:async()=>{if(!clips.length)throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});}});clips.push(clip);if(clips.length===1)clip.play=async()=>{throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});};return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:url=>revoked.push(url)});
  assert.equal(await playback.play('Hello from Lulu','en'),false);assert.equal(states.at(-1),'blocked');assert.equal(calls,1);
  assert.equal(await playback.play('Hello from Lulu','en'),true);assert.equal(calls,1);assert.equal(states.at(-1),'playing');
  clips[1].onended();assert.equal(states.at(-1),'idle');assert.deepEqual(revoked,['blob:0','blob:1']);playback.dispose();
@@ -99,4 +100,42 @@ test('clearing the learning context cancels the old reply and discards its cache
  let requests=0;
  const playback=createLuluVoicePlayback({requestVoice:async()=>{requests++;return generatedVoice();},createAudio:()=>audioDouble(),createUrl:()=>`blob:${requests}`,revokeUrl:()=>{}});
  await playback.play('同一句话','zh');playback.reset();await playback.play('同一句话','zh');assert.equal(requests,2);playback.dispose();
+});
+
+const progressiveText='你好，我是师小噜，很高兴陪你学习中文。我们可以一起练习口语和互动写作。接下来看看适合你的学习计划。'.repeat(3);
+const segmentVoice=(index,count)=>({...generatedVoice(),segmentIndex:index,segmentCount:count});
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('the first segment plays before later synthesis finishes, with only one segment prefetched and cached replay',async()=>{
+ const count=splitLuluSpeech(progressiveText,'zh').length;assert.ok(count>=3);
+ const waiting=Array.from({length:count},deferred),calls=[],clips=[],states=[],revoked=[];
+ let pending=0,maxPending=0;
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload);pending++;maxPending=Math.max(maxPending,pending);try{return await waiting[payload.segmentIndex].promise;}finally{pending--;}},onState:state=>states.push(state),createAudio:()=>{const clip=audioDouble();clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:url=>revoked.push(url)});
+ const first=playback.play(progressiveText,'zh');await flush();assert.deepEqual(calls.map(call=>call.segmentIndex),[0]);
+ waiting[0].resolve(segmentVoice(0,count));assert.equal(await first,true);await flush();
+ assert.equal(clips.length,1);assert.equal(states.at(-1),'playing');assert.deepEqual(calls.map(call=>call.segmentIndex),[0,1]);assert.equal(pending,1);
+ const advance=clips[0].onended();assert.equal(states.at(-1),'loading');assert.equal(clips.length,1);
+ waiting[1].resolve(segmentVoice(1,count));assert.equal(await advance,true);await flush();assert.equal(clips.length,2);assert.equal(states.at(-1),'playing');assert.deepEqual(calls.map(call=>call.segmentIndex),[0,1,2]);
+ for(let index=2;index<count;index++){waiting[index].resolve(segmentVoice(index,count));await clips[index-1].onended();await flush();}
+ clips.at(-1).onended();assert.equal(states.at(-1),'idle');assert.equal(maxPending,1);assert.equal(revoked.length,count);
+ const before=calls.length;assert.equal(await playback.play(progressiveText,'zh'),true);
+ for(let index=0;index<count;index++)await clips[count+index].onended();
+ assert.equal(calls.length,before,'replay uses the one cached reply, including all its segments');assert.equal(states.at(-1),'idle');assert.ok(calls.every(call=>call.text===progressiveText&&call.language==='zh'));playback.dispose();
+});
+
+test('stopping during prefetch never starts an old segment or schedules the following segment',async()=>{
+ const count=splitLuluSpeech(progressiveText,'zh').length,waiting=deferred(),clips=[],calls=[];
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload.segmentIndex);return payload.segmentIndex===0?segmentVoice(0,count):waiting.promise;},createAudio:()=>{const clip=audioDouble();clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:()=>{}});
+ await playback.play(progressiveText,'zh');await flush();assert.deepEqual(calls,[0,1]);
+ const ended=clips[0].onended;playback.stop();waiting.resolve(segmentVoice(1,count));await flush();await ended();
+ assert.equal(clips.length,1);assert.deepEqual(calls,[0,1]);assert.equal(clips[0].pauseCount,1);
+ // The completed prefetch may be reused, but Stop never starts it by itself.
+ await playback.play(progressiveText,'zh');await flush();assert.deepEqual(calls,[0,1]);assert.equal(clips.length,2);playback.dispose();
+});
+
+test('autoplay blocking between segments resumes that cached segment without repeating the opening',async()=>{
+ const count=splitLuluSpeech(progressiveText,'zh').length,calls=[],clips=[],states=[];
+ const playback=createLuluVoicePlayback({requestVoice:async payload=>{calls.push(payload.segmentIndex);return segmentVoice(payload.segmentIndex,count);},onState:state=>states.push(state),createAudio:()=>{const clip=audioDouble();if(clips.length===1)clip.play=async()=>{throw Object.assign(Error('gesture required'),{name:'NotAllowedError'});};clips.push(clip);return clip;},createUrl:()=>`blob:${clips.length}`,revokeUrl:()=>{}});
+ await playback.play(progressiveText,'zh');await flush();assert.equal(await clips[0].onended(),false);assert.equal(states.at(-1),'blocked');assert.deepEqual(calls,[0,1]);
+ assert.equal(await playback.play(progressiveText,'zh'),true);await flush();assert.equal(clips.length,3);assert.deepEqual(calls,[0,1,2]);assert.equal(states.at(-1),'playing');playback.dispose();
 });

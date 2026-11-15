@@ -399,7 +399,7 @@ export function createServer(options={}) {
         }
         if(route==='/api/lulu/voice'&&req.method==='POST'){
           const result=await luluVoice(input,state._private?.luluHistory||[]);
-          return send(200,result,{voice:result.voice,language:result.language,text:input.text,audio:{mime:result.audio.mime,bytes:result.bytes}});
+          return send(200,result,{voice:result.voice,language:result.language,text:input.text,...(result.segmentIndex!==undefined?{segmentIndex:result.segmentIndex,segmentCount:result.segmentCount}:{}),audio:{mime:result.audio.mime,bytes:result.bytes}});
         }
         if(route==='/api/lulu'&&req.method==='POST'){
           if(!['intro','chat'].includes(input.mode)||!Object.hasOwn(LULU_SECTIONS,input.section))throw fail(400,'Choose an available lesson.');
