@@ -1,11 +1,12 @@
 /* Lulu is separate from the learning workspace, preserving unfinished exercises. */
 .lulu-guide,.lulu-guide *{box-sizing:border-box;color:#000;-webkit-text-fill-color:#000;font-family:HanziStudyText,"Microsoft YaHei","SimSun",sans-serif}
-.lulu-guide{position:fixed;right:22px;bottom:18px;z-index:48;font-size:18px;line-height:1.65;--lulu-mouth-x:52.6%;--lulu-mouth-y:51.86%}
+.lulu-guide{position:fixed;right:22px;bottom:18px;z-index:48;font-size:18px;line-height:1.65;--lulu-mouth-x:52.6%;--lulu-mouth-y:57.2%}
 .lulu-guide button,.lulu-guide textarea,.lulu-guide select{font:inherit;line-height:1.5}
 .lulu-guide button{border:1px solid #cbd6bf;background:#fffef7;padding:8px 12px;border-radius:9px;min-height:40px;cursor:pointer;transition:background .15s}
 .lulu-guide button:hover:not(:disabled){background:#edf3e4}.lulu-guide button:disabled{opacity:.6;cursor:wait}
 .lulu-guide :is(button,textarea,select):focus-visible{outline:3px solid #a46c25;outline-offset:3px}
-.lulu-launcher{display:flex;align-items:flex-end;gap:3px!important;padding:0!important;border:0!important;background:transparent!important;filter:drop-shadow(0 6px 6px #65420d20)}
+.lulu-launcher{display:flex;align-items:flex-end;gap:3px!important;padding:0!important;border:0!important;background:transparent!important;filter:drop-shadow(0 6px 6px #65420d20);touch-action:none;user-select:none;cursor:grab!important}
+.lulu-guide.is-dragging .lulu-launcher{cursor:grabbing!important}.lulu-guide.is-dragging .lulu-character{animation:none!important}
 .lulu-character{position:relative;display:block;width:92px;line-height:0;transform-origin:50% 100%;animation:lulu-breathe 4s ease-in-out infinite}
 .lulu-character img{display:block;width:100%;height:auto;pointer-events:none;user-select:none}
 .lulu-launcher-label{display:block;align-self:flex-end;padding:4px 12px;background:#fff7d7;border:1px solid #e5c36e;border-radius:16px;margin:0 0 10px -9px;font-weight:600;font-size:17px}

@@ -19,8 +19,34 @@ const VOICE_COPY={
  ko:{voiceNote:'참고 음색 · 합성 음성',deviceVoiceNote:'만화 캐릭터 음색 · 기기 음성',voiceLoading:'스샤오루의 목소리를 준비하고 있어요…',voiceUnavailable:'스샤오루의 음성 서비스를 사용할 수 없어요. 다시 시도하거나 기기의 만화 음색을 선택해 주세요.',voiceBlocked:'음성이 준비되었어요. ‘다시 듣기’를 눌러 주세요.',deviceVoice:'기기의 만화 음색 사용'},
 };
 for(const code of Object.keys(COPY))Object.assign(COPY[code],VOICE_COPY[code]);
+const DRAG_HINT={zh:'拖动师小噜调整位置，单击打开对话',en:'Drag Shi Xiaolu to move; click to chat',es:'Arrastra a Shi Xiaolu para moverlo; haz clic para conversar',fr:'Déplacez Shi Xiaolu en le faisant glisser ; cliquez pour discuter',de:'Shi Xiaolu zum Verschieben ziehen; zum Chatten anklicken',ja:'師小ルーをドラッグして移動、クリックして会話',ko:'스샤오루를 끌어서 이동하고 클릭해서 대화해 보세요'};
+const POSITION_KEY='hanzi-shixiaolu-position';
 export const normalizeGuideSection=value=>SECTIONS.includes(value)?value:'overview';
 const language=value=>Object.hasOwn(COPY,value)?value:'en';
+const between=(value,min,max)=>Math.max(min,Math.min(Math.max(min,max),Number.isFinite(value)?value:min));
+export function clampLuluPosition(position,viewport,size){
+ const margin=Math.min(12,Math.max(0,Math.min(viewport.width,viewport.height)/4));
+ return{x:between(position.x,margin,viewport.width-size.width-margin),y:between(position.y,margin,viewport.height-size.height-margin)};
+}
+export function luluAnchorPosition(position,viewport,size,{normalise=false}={}){
+ const margin=Math.min(12,Math.max(0,Math.min(viewport.width,viewport.height)/4)),travelX=Math.max(0,viewport.width-size.width-margin*2),travelY=Math.max(0,viewport.height-size.height-margin*2);
+ if(normalise){const p=clampLuluPosition(position,viewport,size);return{x:travelX?(p.x-margin)/travelX:0,y:travelY?(p.y-margin)/travelY:0};}
+ return clampLuluPosition({x:margin+between(position.x,0,1)*travelX,y:margin+between(position.y,0,1)*travelY},viewport,size);
+}
+/** Choose usable space around the character, then constrain the entire dialog to the viewport. */
+export function luluPanelPlacement(position,size,viewport){
+ const margin=Math.min(12,Math.max(0,Math.min(viewport.width,viewport.height)/4)),gap=12,width=Math.min(440,Math.max(1,viewport.width-margin*2)),height=Math.min(740,Math.max(1,viewport.height-margin*2));
+ const above=Math.max(0,position.y-gap-margin),below=Math.max(0,viewport.height-position.y-size.height-gap-margin),left=position.x-gap-margin,right=viewport.width-position.x-size.width-gap-margin;
+ const sideFits=Math.max(left,right)>=width;
+ let side,x,y,maxHeight;
+ if(Math.max(above,below)>=Math.min(380,height)||!sideFits){
+  side=above>=below?'above':'below';maxHeight=Math.min(height,Math.max(Math.min(120,height),side==='above'?above:below));
+  x=position.x+size.width-width;y=side==='above'?position.y-gap-maxHeight:position.y+size.height+gap;
+ }else{
+  side=right>=left?'right':'left';maxHeight=height;x=side==='right'?position.x+size.width+gap:position.x-gap-width;y=position.y+size.height/2-maxHeight/2;
+ }
+ return{side,x:between(x,margin,viewport.width-width-margin),y:between(y,margin,viewport.height-maxHeight-margin),width,maxHeight};
+}
 export function voiceForLanguage(voices,code){
  const prefix=language(code),matching=voices.filter(voice=>String(voice.lang||'').toLowerCase().replaceAll('_','-').split('-')[0]===prefix);
  return matching.find(voice=>/xiaoxiao|xiaoyi|aria|jenny|samantha|susan|amelie|elvira|nanami|sunhi/i.test(voice.name||''))||matching.find(voice=>voice.default)||matching[0]||null;
@@ -77,7 +103,29 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
  const find=selector=>root.querySelector(selector),panel=find('.lulu-panel'),launcher=find('.lulu-launcher'),input=find('#lulu-input'),reply=find('.lulu-reply');
  const deviceVoiceButton=document.createElement('button');deviceVoiceButton.className='lulu-device-voice';deviceVoiceButton.type='button';deviceVoiceButton.hidden=true;find('.lulu-audio').append(deviceVoiceButton);
  let opened=false,tourIndex=null,notice='',utterance=null,recognition=null,speechGeneration=0,disposed=false;
+ let anchor=null,drag=null,suppressClick=false;
+ try{const saved=JSON.parse(window.localStorage.getItem(POSITION_KEY));if(saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y))anchor={x:between(saved.x,0,1),y:between(saved.y,0,1)};}catch{}
  const copy=()=>COPY[language(getLanguage())];
+ const viewport=()=>({width:window.innerWidth,height:window.innerHeight});
+ const launcherSize=()=>{const box=launcher.getBoundingClientRect();return{width:box.width,height:box.height};};
+ function positionPanel(){
+  if(!opened)return;
+  const box=launcher.getBoundingClientRect(),layout=luluPanelPlacement({x:box.left,y:box.top},{width:box.width,height:box.height},viewport()),base=root.getBoundingClientRect();
+  Object.assign(panel.style,{left:(layout.x-base.left)+'px',top:(layout.y-base.top)+'px',right:'auto',bottom:'auto',width:layout.width+'px',maxHeight:layout.maxHeight+'px'});panel.dataset.side=layout.side;
+ }
+ function applyPosition(position,{save=false}={}){
+  const size=launcherSize(),screen=viewport(),point=clampLuluPosition(position,screen,size);
+  Object.assign(root.style,{left:point.x+'px',top:point.y+'px',right:'auto',bottom:'auto'});anchor=luluAnchorPosition(point,screen,size,{normalise:true});
+  if(save)try{window.localStorage.setItem(POSITION_KEY,JSON.stringify(anchor));}catch{}
+  positionPanel();
+ }
+ function refreshPosition(){if(anchor)applyPosition(luluAnchorPosition(anchor,viewport(),launcherSize()));else positionPanel();}
+ function finishDrag(event){
+  if(!drag||event.pointerId!==drag.pointerId)return;
+  const ended=drag;drag=null;root.classList.remove('is-dragging');
+  if(launcher.hasPointerCapture?.(ended.pointerId))launcher.releasePointerCapture(ended.pointerId);
+  if(ended.moved){suppressClick=true;const box=launcher.getBoundingClientRect();applyPosition({x:box.left,y:box.top},{save:true});if(event.cancelable)event.preventDefault();}
+ }
  const referenceVoice=createLuluVoicePlayback({requestVoice,onState:status=>{
   root.classList.toggle('is-speaking',status==='playing');deviceVoiceButton.hidden=status!=='unavailable';
   find('.lulu-audio-status').textContent=({loading:copy().voiceLoading,unavailable:copy().voiceUnavailable,blocked:copy().voiceBlocked})[status]||'';
@@ -110,7 +158,7 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
  function render(){
   if(disposed)return;
   const c=copy(),s=conversation?.state;
-  root.lang=LOCALES[language(getLanguage())];root.setAttribute('aria-label',c.name);launcher.setAttribute('aria-label',c.open);launcher.setAttribute('aria-expanded',String(opened));panel.hidden=!opened;
+  root.lang=LOCALES[language(getLanguage())];root.setAttribute('aria-label',c.name);launcher.setAttribute('aria-label',c.open);launcher.title=DRAG_HINT[language(getLanguage())];launcher.setAttribute('aria-expanded',String(opened));panel.hidden=!opened;
   find('.lulu-launcher-label').textContent=c.name;find('#lulu-title').textContent=c.title;find('.lulu-close').setAttribute('aria-label',c.close);find('.lulu-context').textContent=c.sections[SECTIONS.indexOf(s.section)];
   find('.lulu-section-label>span').textContent=c.current;
   const select=find('.lulu-section');select.replaceChildren(...SECTIONS.map((view,index)=>{const option=document.createElement('option');option.value=view;option.textContent=c.sections[index];return option;}));select.value=s.section;
@@ -123,11 +171,25 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
   find('.lulu-replay').disabled=!s.reply||s.pending;
   find('.lulu-actions').replaceChildren(...s.actions.map(action=>{const button=document.createElement('button');button.type='button';button.textContent=action.label;button.addEventListener('click',()=>{stopAudio();navigate(action.view);});return button;}));
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;find('.lulu-mic').hidden=!Recognition;
+  refreshPosition();
  }
  function setOpen(value){opened=value;if(!value){stopAudio();stopMicrophone();launcher.focus();}render();if(value)input.focus();}
  function introduce(){notice='';stopAudio();stopMicrophone();void conversation.ask('intro');}
  function moveTour(index){tourIndex=Math.max(0,Math.min(SECTIONS.length-1,index));const section=SECTIONS[tourIndex];conversation.selectSection(section);navigate(section);introduce();}
- launcher.addEventListener('click',()=>setOpen(!opened));find('.lulu-close').addEventListener('click',()=>setOpen(false));
+ launcher.addEventListener('pointerdown',event=>{
+  if(event.button!==0||event.isPrimary===false||drag)return;
+  suppressClick=false;const box=launcher.getBoundingClientRect();drag={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,x:box.left,y:box.top,moved:false};
+  launcher.setPointerCapture?.(event.pointerId);
+ });
+ launcher.addEventListener('pointermove',event=>{
+  if(!drag||event.pointerId!==drag.pointerId)return;
+  const dx=event.clientX-drag.startX,dy=event.clientY-drag.startY;
+  if(!drag.moved&&Math.hypot(dx,dy)<6)return;
+  drag.moved=true;root.classList.add('is-dragging');if(event.cancelable)event.preventDefault();applyPosition({x:drag.x+dx,y:drag.y+dy});
+ });
+ for(const type of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(type,finishDrag);
+ launcher.addEventListener('dragstart',event=>event.preventDefault());
+ launcher.addEventListener('click',event=>{if(suppressClick&&event.detail!==0){suppressClick=false;event.preventDefault();return;}suppressClick=false;setOpen(!opened);});find('.lulu-close').addEventListener('click',()=>setOpen(false));
  find('.lulu-intro').addEventListener('click',introduce);
  find('.lulu-tour').addEventListener('click',()=>moveTour(0));find('.lulu-previous').addEventListener('click',()=>moveTour(tourIndex-1));find('.lulu-next').addEventListener('click',()=>moveTour(tourIndex+1));find('.lulu-tour-finish').addEventListener('click',()=>{tourIndex=null;stopAudio();render();});
  find('.lulu-section').addEventListener('change',event=>{tourIndex=null;notice='';stopAudio();conversation.selectSection(event.target.value);});
@@ -144,6 +206,7 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
  });
  root.addEventListener('keydown',event=>{if(event.key==='Escape'&&opened){event.preventDefault();setOpen(false);}});
  const onPageHide=()=>{stopAudio();stopMicrophone();};window.addEventListener('pagehide',onPageHide);
+ const avatar=find('.lulu-character img');avatar.addEventListener('load',refreshPosition);window.addEventListener('resize',refreshPosition);
  render();
- return{resetContext(){stopAudio();referenceVoice.reset();stopMicrophone();tourIndex=null;notice='';input.value='';conversation.refreshLanguage();},refreshLanguage(){stopAudio();stopMicrophone();tourIndex=null;notice=copy().languageChanged;find('.lulu-audio-status').textContent='';conversation.refreshLanguage();},notifyView(view){const section=normalizeGuideSection(view);if(section===conversation.state.section)return;stopAudio();stopMicrophone();tourIndex=null;notice=copy().viewChanged;conversation.selectSection(section);},dispose(){disposed=true;stopAudio();referenceVoice.dispose();stopMicrophone();conversation.dispose();window.removeEventListener('pagehide',onPageHide);root.remove();}};
+ return{resetContext(){stopAudio();referenceVoice.reset();stopMicrophone();tourIndex=null;notice='';input.value='';conversation.refreshLanguage();},refreshLanguage(){stopAudio();stopMicrophone();tourIndex=null;notice=copy().languageChanged;find('.lulu-audio-status').textContent='';conversation.refreshLanguage();},notifyView(view){const section=normalizeGuideSection(view);if(section===conversation.state.section)return;stopAudio();stopMicrophone();tourIndex=null;notice=copy().viewChanged;conversation.selectSection(section);},dispose(){disposed=true;stopAudio();referenceVoice.dispose();stopMicrophone();conversation.dispose();avatar.removeEventListener('load',refreshPosition);window.removeEventListener('resize',refreshPosition);window.removeEventListener('pagehide',onPageHide);if(drag)finishDrag({pointerId:drag.pointerId});root.remove();}};
 }

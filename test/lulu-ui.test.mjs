@@ -1,8 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createLuluConversation,createLuluVoicePlayback,normalizeGuideSection,voiceForLanguage} from '../public/lulu.js';
+import {createLuluConversation,createLuluVoicePlayback,normalizeGuideSection,voiceForLanguage,clampLuluPosition,luluAnchorPosition,luluPanelPlacement} from '../public/lulu.js';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+
+test('drag positions stay visible and saved anchors preserve their relative place after resize',()=>{
+ const size={width:200,height:180},large={width:1400,height:900},small={width:600,height:400};
+ assert.deepEqual(clampLuluPosition({x:-100,y:9000},large,size),{x:12,y:708});
+ const pixel={x:1188,y:708},anchor=luluAnchorPosition(pixel,large,size,{normalise:true});assert.deepEqual(anchor,{x:1,y:1});
+ assert.deepEqual(luluAnchorPosition(anchor,small,size),{x:388,y:208});
+ assert.deepEqual(luluAnchorPosition({x:9,y:-4},small,size),{x:388,y:12});
+ const middle=luluAnchorPosition({x:.5,y:.5},large,size);assert.deepEqual(luluAnchorPosition(middle,large,size,{normalise:true}),{x:.5,y:.5});
+});
+
+test('guide dialogs choose above, below or side space and stay inside the viewport without covering the character',()=>{
+ const size={width:200,height:180},viewport={width:1400,height:900};
+ for(const [position,expected] of [[{x:12,y:12},'below'],[{x:1188,y:708},'above'],[{x:12,y:360},'right'],[{x:1188,y:360},'left']]){
+  const panel=luluPanelPlacement(position,size,viewport);assert.equal(panel.side,expected);
+  assert.ok(panel.x>=12&&panel.y>=12);assert.ok(panel.x+panel.width<=viewport.width-12);assert.ok(panel.y+panel.maxHeight<=viewport.height-12);
+  assert.ok(panel.x+panel.width<=position.x||panel.x>=position.x+size.width||panel.y+panel.maxHeight<=position.y||panel.y>=position.y+size.height,'panel and character do not overlap');
+ }
+ const compact=luluPanelPlacement({x:100,y:12},size,{width:360,height:600});assert.equal(compact.width,336);assert.ok(compact.x+compact.width<=348);assert.ok(compact.y+compact.maxHeight<=588);
+});
 test('guide requests carry the selected section and language, accept safe actions, and wait for explicit interaction',async()=>{
  const calls=[],replies=[];
  const guide=createLuluConversation({getLanguage:()=>'zh',getView:()=>'write',request:async payload=>{calls.push(payload);return{reply:'我们可以一起修改中文句子。',actions:[{view:'write',label:'去写作'},{view:'https://example.com',label:'Outside'},{view:'learn',label:4}]};},onReply:(...args)=>replies.push(args)});
