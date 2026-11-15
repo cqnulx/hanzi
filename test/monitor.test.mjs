@@ -7,7 +7,7 @@ import {createServer} from '../server.mjs';
 import {createGateway} from '../gateway.mjs';
 import {localDate} from '../request-monitor.mjs';
 
-const website='https://qiuxicqu.github.io';
+const website='https://cqnulx.github.io';
 const listen=async server=>{await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));return `http://127.0.0.1:${server.address().port}`;};
 const close=server=>new Promise(resolve=>server.close(resolve));
 async function fixture({fetchImpl,apiKey='monitor-private-key'}={}) {

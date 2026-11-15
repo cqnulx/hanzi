@@ -65,7 +65,7 @@ test('public voice playback remains session bound and logs text plus audio metad
  let synthesisCalls=0;
  const server=createServer({storageDir:directory,apiKey:'test-only',fetchImpl:async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({reply,actions:[]})}}]})),voiceFetchImpl:async()=>{synthesisCalls++;return recording();}});
  const upstream=await listen(server),gateway=createGateway({upstreamOrigin:upstream,reportRejection:async()=>{}}),base=await listen(gateway);
- const request=(route,payload,session)=>fetch(base+route,{method:'POST',headers:{Origin:'https://qiuxicqu.github.io','Content-Type':'application/json',...(session?{'X-Hanzi-Session':session}:{})},body:JSON.stringify(payload)});
+ const request=(route,payload,session)=>fetch(base+route,{method:'POST',headers:{Origin:'https://cqnulx.github.io','Content-Type':'application/json',...(session?{'X-Hanzi-Session':session}:{})},body:JSON.stringify(payload)});
  try{
   const intro=await request('/api/lulu',{mode:'intro',section:'overview',language:'zh'}),session=intro.headers.get('x-hanzi-session');assert.equal(intro.status,200);await intro.json();
   const voice=await request('/api/lulu/voice',{text:reply,language:'zh'},session);assert.equal(voice.status,200);assert.equal((await voice.json()).voice,'reference');

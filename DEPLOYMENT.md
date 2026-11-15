@@ -1,8 +1,8 @@
 # GitHub 网页发布
 
-仓库：<https://github.com/qiuxicqu/hanzi>
+仓库：<https://github.com/cqnulx/hanzi>
 
-公开地址：<https://qiuxicqu.github.io/hanzi/>。GitHub Pages 已成功发布。
+公开地址：<https://cqnulx.github.io/hanzi/>。GitHub Pages 已成功发布。
 
 ## 发布方式
 

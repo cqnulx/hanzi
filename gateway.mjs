@@ -28,7 +28,7 @@ async function readBody(req, capture) {
  * they are not site passwords. Model access is deliberately unrestricted. */
 export function createGateway(options={}) {
   const upstream=origin(options.upstreamOrigin||process.env.HANZI_UPSTREAM_ORIGIN||'http://127.0.0.1:4173','Upstream',{upstream:true});
-  const allowedOrigin=origin(options.allowedOrigin||process.env.HANZI_FRONTEND_ORIGIN||'https://qiuxicqu.github.io','Allowed website');
+  const allowedOrigin=origin(options.allowedOrigin||process.env.HANZI_FRONTEND_ORIGIN||'https://cqnulx.github.io','Allowed website');
   const fetchImpl=options.fetchImpl||globalThis.fetch;
   const timeoutMs=options.timeoutMs??120000;
   const reportRejection=options.reportRejection||(async record=>{

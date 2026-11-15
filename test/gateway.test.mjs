@@ -4,7 +4,7 @@ import http from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {createGateway} from '../gateway.mjs';
 
-const website='https://qiuxicqu.github.io';
+const website='https://cqnulx.github.io';
 async function listen(server){await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));return`http://127.0.0.1:${server.address().port}`;}
 async function close(server){server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
 async function fixture(){
@@ -59,7 +59,7 @@ test('gateway bounds body size, preserves backend errors and refuses redirects',
 
 test('gateway does not accept non-local upstream destinations',()=>{
  assert.throws(()=>createGateway({upstreamOrigin:'https://example.com'}),/local HTTP/);
- assert.throws(()=>createGateway({allowedOrigin:'https://qiuxicqu.github.io/hanzi/'}),/origin only/);
+ assert.throws(()=>createGateway({allowedOrigin:'https://cqnulx.github.io/hanzi/'}),/origin only/);
 });
 
 test('learning-hint localization is forwarded for the allowed website with its isolated session',async()=>{

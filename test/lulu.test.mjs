@@ -82,7 +82,7 @@ test('Lulu filters external, duplicate and malformed navigation while returning 
 });
 
 test('the public gateway forwards Lulu with its isolated session only for the existing allowed website',async()=>{
- const f=await fixture(),website='https://qiuxicqu.github.io';
+ const f=await fixture(),website='https://cqnulx.github.io';
  const gateway=createGateway({upstreamOrigin:f.base,allowedOrigin:website,reportRejection:async()=>{}}),base=await listen(gateway);
  try{
   const payload={mode:'intro',section:'overview',language:'en'};

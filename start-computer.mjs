@@ -69,12 +69,12 @@ async function main(){
       catch(error){if(error.code!==1)throw Error('Unable to inspect the public website configuration.');difference=1;}
       if(difference){
         await run(git,['add','--','public/deployment-config.js']);
-        const commit=await run(git,['-c','user.name=qiuxicqu','-c','user.email=qiuxicqu@users.noreply.github.com','commit','--only','-m','Connect website to computer backend','--','public/deployment-config.js']);
+        const commit=await run(git,['-c','user.name=cqnulx','-c','user.email=cqnulx@users.noreply.github.com','commit','--only','-m','Connect website to computer backend','--','public/deployment-config.js']);
         if(commit.stdout)process.stdout.write(commit.stdout);
       }
       try{const pushed=await run(git,['push','origin','main']);if(pushed.stdout)process.stdout.write(pushed.stdout);if(pushed.stderr)process.stdout.write(pushed.stderr);}
       catch{throw Error('The backend is running but GitHub upload failed. Sign in to GitHub and run this script again.');}
-      console.log('Wait for GitHub Pages to publish, then refresh https://qiuxicqu.github.io/hanzi/.');
+      console.log('Wait for GitHub Pages to publish, then refresh https://cqnulx.github.io/hanzi/.');
     }else console.log('GitHub upload was skipped. Publish public/deployment-config.js to connect the public website.');
     console.log('Keep this computer on and connected. Run node stop-computer.mjs to stop helpers started by this script.');
   });
