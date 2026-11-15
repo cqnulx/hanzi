@@ -2,7 +2,7 @@ import {promises as fs, createWriteStream} from 'node:fs';
 import path from 'node:path';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
-import {root,runtime,tunnelPattern,wait,run,exists,findExecutable,isOwnedProcess,withRuntimeLock,loadState,saveState,healthy,startHelper,waitForService} from './computer-runtime.mjs';
+import {root,runtime,tunnelPattern,wait,run,exists,findExecutable,isOwnedProcess,withRuntimeLock,loadState,saveState,healthy,startHelper,waitForService,ensureVoiceHelper} from './computer-runtime.mjs';
 
 const skipPublish=process.argv.includes('--skip-publish');
 const configurationFile=path.join(root,'public','deployment-config.js');
@@ -22,6 +22,7 @@ async function main(){
       const record=await startHelper('gateway',process.execPath,['gateway.mjs'],state);
       await waitForService('http://127.0.0.1:4174',record);
     }
+    await ensureVoiceHelper(state);
     const ownedTunnel=state.processes.findLast(record=>record.label==='tunnel');
     let reuse=Boolean(ownedTunnel&&tunnelPattern.test(state.tunnelUrl||''));
     if(!reuse&&await exists(configurationFile)){

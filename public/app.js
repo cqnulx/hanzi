@@ -4,6 +4,8 @@ import { LANGUAGES, normalizeLanguage, languageInfo } from './languages.js';
 import { getSpeechSupport, speakChinese, stopSpeaking, startRecognition } from './speech.js';
 import { createLessonVideo } from './lesson-video.js';
 import { API_BASE_URL } from './deployment-config.js';
+import { initializeLulu } from './lulu.js';
+let luluGuide=null;
 let lessons=getLocalizedLessons(getLanguage());
 
 const localHost=['localhost','127.0.0.1','::1','[::1]'].includes(location.hostname);
@@ -298,6 +300,7 @@ function showCoach(title,feedback,nextStep){
  showInfo(title,`<span class="badge">Companion feedback</span>${feedback?`<p data-no-translate>${esc(feedback)}</p>`:''}${nextStep?`<div class="next-step"><span class="eyebrow">YOUR NEXT SMALL STEP</span><p data-no-translate>${esc(nextStep)}</p></div>`:''}`);
 }
 function clearGeneratedLearning(){
+ luluGuide?.resetContext();
  clearPracticeFeedback();
  app.planFeedbackResult=null;app.planFeedbackText='';app.planAdaptation=null;app.addedLessonId=null;
  learningRevision++;contentGeneration++;app.completedQuiz=null;app.localizationError=false;app.lessonPending.clear();app.exercisePending.clear();
@@ -317,10 +320,10 @@ function switchLanguage(language){
  app.exerciseSets.clear();app.completedQuiz=null;app.quizResult=null;
  setLanguage(language);syncCatalogue();render();
  for(const field of fields){const element=field.id?document.getElementById(field.id):[...$('#view-root').querySelectorAll('input')].find(e=>e.name===field.name&&e.value===field.value);if(!element)continue;if(field.type==='radio'||field.type==='checkbox')element.checked=field.checked;else element.value=field.value;}
- applyTranslations();ensureLocalizedLearning();
+ applyTranslations();luluGuide?.refreshLanguage();ensureLocalizedLearning();
 }
 function persistDraft() {if($('#writing-text'))app.writingText=$('#writing-text').value;try{localStorage.setItem('hanzi-writing-draft',app.writingText);}catch{}}
-function navigate(view,id) {if(app.view==='write')persistDraft();if(view==='write'&&app.view==='learn')app.writingLessonId=selectedLesson().id;if(id){clearPracticeFeedback();app.completedQuiz=null;app.lessonId=id;app.writingLessonId=id;app.phraseIndex=0;app.quizResult=null;app.speakingResult=null;}app.view=labels[view]?view:'overview';const hash=`#${app.view}${id?'/'+encodeURIComponent(id):''}`;if(location.hash!==hash)history.pushState(null,'',hash);render();window.scrollTo({top:0,behavior:'instant'});}
+function navigate(view,id) {if(app.view==='write')persistDraft();if(view==='write'&&app.view==='learn')app.writingLessonId=selectedLesson().id;if(id){clearPracticeFeedback();app.completedQuiz=null;app.lessonId=id;app.writingLessonId=id;app.phraseIndex=0;app.quizResult=null;app.speakingResult=null;}app.view=labels[view]?view:'overview';const hash=`#${app.view}${id?'/'+encodeURIComponent(id):''}`;if(location.hash!==hash)history.pushState(null,'',hash);render();luluGuide?.notifyView(app.view);window.scrollTo({top:0,behavior:'instant'});}
 function restoreRoute() {const[view,id]=location.hash.slice(1).split('/');navigate(labels[view]?view:'overview',lessons.some(l=>l.id===id)?id:undefined);}
 function showInfo(title,content) {$('#content-dialog-body').innerHTML=`<span class="eyebrow">HANZI LEARNING SPACE</span><h2>${esc(title)}</h2>${content}`;$('#content-dialog').showModal();}
 function openSettings() {const form=$('#profile-form');for(const[k,v]of Object.entries(app.state.profile))if(form.elements[k])form.elements[k].value=v;const selected=LANGUAGES.find(item=>item.name===app.state.profile.nativeLanguage||item.code===app.state.profile.nativeLanguage);$('#learner-language').value=(selected||languageInfo(getLanguage())).name;$('#settings-dialog').showModal();}
@@ -438,6 +441,7 @@ async function connectLearningService() {
 function recoverLearningService(){if(app.serviceUnavailable&&!staticPagesMode)return init();}
 window.addEventListener('online',recoverLearningService);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')return recoverLearningService();});
+if(document.body)luluGuide=initializeLulu({request:payload=>post('/lulu',payload),requestVoice:payload=>post('/lulu/voice',payload),getLanguage,getView:()=>app.view,navigate:view=>navigate(view)});
 populateLanguageSelectors();
 observeTranslations();
 init();

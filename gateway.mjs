@@ -6,7 +6,7 @@ const MAX_BODY = 32768;
 const MAX_REPORTED_INPUT = 4000;
 const SESSION = /^[a-f0-9]{64}$/;
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
-const ROUTES = new Set(['health','state','export','data','profile','memory','activity','lesson','exercises','quiz','chat','writing','speaking','plan','feedback','localize-learning'].map(route=>`/api/${route}`));
+const ROUTES = new Set(['health','state','export','data','profile','memory','activity','lesson','exercises','quiz','chat','lulu','lulu/voice','writing','speaking','plan','feedback','localize-learning'].map(route=>`/api/${route}`));
 const fail = (status,message) => Object.assign(new Error(message),{status});
 
 function origin(value,name,{upstream=false}={}) {

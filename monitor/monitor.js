@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-const kinds={chat:'伴学对话',writing:'交互写作',speaking:'口语练习',lesson:'课程生成',exercises:'习题生成',quiz:'习题批改',plan:'学习计划',profile:'学习画像',memory:'长期记忆',activity:'学习活动',feedback:'学习反思',state:'学习档案',export:'数据导出',data:'清空档案'};
+const kinds={chat:'伴学对话',lulu:'噜噜导览与语音',writing:'交互写作',speaking:'口语练习',lesson:'课程生成',exercises:'习题生成',quiz:'习题批改',plan:'学习计划',profile:'学习画像',memory:'长期记忆',activity:'学习活动',feedback:'学习反思',state:'学习档案',export:'数据导出',data:'清空档案'};
 const format=value=>value===undefined?'无内容':typeof value==='string'?value:JSON.stringify(value,(key,item)=>/^(.*model|provider|apiKey|authorization)$/i.test(key)?undefined:item,2);
 const clock=value=>{const date=new Date(value);return Number.isNaN(date.getTime())?String(value||'—'):date.toLocaleString('zh-CN',{hour12:false});};
 const today=new Date();$('date').value=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');

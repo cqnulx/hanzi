@@ -1,8 +1,9 @@
-import {withRuntimeLock,loadState,saveState,isOwnedProcess} from './computer-runtime.mjs';
+import {withRuntimeLock,loadState,saveState,isOwnedProcess,voiceHealth,registerVoiceWorker} from './computer-runtime.mjs';
 
 async function main(){
   await withRuntimeLock(async()=>{
     const state=await loadState();const remaining=[];
+    await registerVoiceWorker(state,state.processes.findLast(record=>record.label==='voice'),await voiceHealth());
     for(const record of [...state.processes].reverse()){
       if(!await isOwnedProcess(record))continue;
       try{process.kill(record.id);console.log('Stopped '+record.label+'.');}
