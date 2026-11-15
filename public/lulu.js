@@ -39,8 +39,7 @@ const MUSIC_COPY={
  ko:{musicPlay:'음악 재생',musicPause:'음악 일시 정지',musicLoading:'음악을 불러오고 있어요…',musicError:'아직 이 노래를 재생할 수 없어요. 나중에 다시 시도해 주세요.',song:'반딧불이 노래'},
 };
 for(const code of Object.keys(COPY))Object.assign(COPY[code],MUSIC_COPY[code]);
-// Set this to a browser-playable local asset once the supplied song is available.
-const MUSIC_SOURCE='';
+const MUSIC_SOURCE='./lulu-firefly-song.m4a?v=music-2';
 const DRAG_HINT={zh:'拖动师小噜调整位置，单击打开对话',en:'Drag Shi Xiaolu to move; click to chat',es:'Arrastra a Shi Xiaolu para moverlo; haz clic para conversar',fr:'Déplacez Shi Xiaolu en le faisant glisser ; cliquez pour discuter',de:'Shi Xiaolu zum Verschieben ziehen; zum Chatten anklicken',ja:'師小ルーをドラッグして移動、クリックして会話',ko:'스샤오루를 끌어서 이동하고 클릭해서 대화해 보세요'};
 const POSITION_KEY='hanzi-shixiaolu-position';
 export const normalizeGuideSection=value=>SECTIONS.includes(value)?value:'overview';
@@ -161,7 +160,7 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
  let anchor=null,drag=null,suppressClick=false;
  try{const saved=JSON.parse(window.localStorage.getItem(POSITION_KEY));if(saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y))anchor={x:between(saved.x,0,1),y:between(saved.y,0,1)};}catch{}
  const copy=()=>COPY[language(getLanguage())];
- const music=new Audio();music.preload='none';if(MUSIC_SOURCE)music.src=new URL(MUSIC_SOURCE,import.meta.url).href;
+ const music=document.createElement('audio');music.className='lulu-music-player';music.preload='none';music.hidden=true;if(MUSIC_SOURCE)music.src=new URL(MUSIC_SOURCE,import.meta.url).href;root.append(music);
  let musicState='idle',musicGeneration=0;
  function renderMusic(){
   const c=copy(),active=musicState==='loading'||musicState==='playing',button=find('.lulu-music-toggle');
@@ -178,7 +177,7 @@ export function initializeLulu({request,requestVoice=async()=>{throw Error('Voic
   const sequence=++musicGeneration;musicState='loading';renderMusic();
   try{await music.play();}catch{if(!disposed&&sequence===musicGeneration){musicState='error';renderMusic();}}
  }
- music.onplaying=()=>{if(!disposed){musicState='playing';renderMusic();}};
+ music.onplaying=()=>{if(!disposed&&!music.paused){musicState='playing';renderMusic();}};
  music.onpause=()=>{if(!disposed&&musicState!=='error'){musicState='idle';renderMusic();}};
  music.onended=()=>{if(!disposed){musicState='idle';renderMusic();}};
  music.onerror=()=>{if(!disposed){musicState='error';renderMusic();}};
